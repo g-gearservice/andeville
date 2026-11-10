@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key><string>com.ggear.faytai</string>
+	<key>CFBundleName</key><string>Andeville</string>
+	<key>CFBundleDisplayName</key><string>Andeville</string>
+	<key>CFBundleExecutable</key><string>Andeville</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>0.1</string>
+	<key>CFBundleVersion</key><string>1</string>
+	<key>LSMinimumSystemVersion</key><string>14.0</string>
+	<key>LSUIElement</key><true/>
+	<key>NSMicrophoneUsageDescription</key><string>실험 기능에서 초음파 반사음을 듣고 앞에 사람이 있는지 추정하는 데 마이크를 사용합니다. 소리는 저장하거나 전송하지 않습니다.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key><string>실험 기능에서 연결된 에어팟의 블루투스 신호 세기로 자리를 비웠는지 추정하는 데 블루투스를 사용합니다. 저장하거나 전송하지 않습니다.</string>
+	<key>NSCameraUsageDescription</key><string>얼굴을 등록하고 본인인지 확인하는 데 카메라를 사용합니다. 영상은 저장하거나 전송하지 않습니다.</string>
+</dict>
+</plist>
