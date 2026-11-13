@@ -128,8 +128,9 @@ struct NotchLive: View {
     static let swell: CGFloat = 3
 
     var body: some View {
-        let song = model.locked ? nil : model.nowPlaying.flatMap { $0.playing ? $0 : nil }
-        let on = model.hud != nil || enabled && (model.charge != nil || song != nil)
+        // Paused, the song stays a minute (and while the cursor is on its bars), to be played again from there.
+        let song = model.locked ? nil : model.nowPlaying.flatMap { $0.playing || model.paused || model.barsHover ? $0 : nil }
+        let on = model.hud != nil || enabled && (model.charge != nil || model.accessory != nil || song != nil)
         // Keyed by song, not by image: the stream hands over a fresh image object on every play/pause.
         let tint = song?.tint.map(Color.init) ?? .white // The artwork's color, also on the volume and brightness keys while a song plays.
         let artKey = song.map { "\($0.title)|\($0.artist)|\($0.artwork != nil)" } ?? ""
@@ -147,6 +148,8 @@ struct NotchLive: View {
                     } else if model.charge != nil {
                         Image(systemName: "bolt.fill").font(.system(size: 13)).foregroundStyle(.green)
                             .transition(.blurReplace)
+                    } else if let a = model.accessory {
+                        SpinIn(symbol: a.symbol).id(a.id).transition(.blurReplace)
                     } else {
                         // A new song's picture blurs in over the old one blurring out.
                         ZStack {
@@ -172,8 +175,15 @@ struct NotchLive: View {
                     } else if let b = model.charge {
                         Text("\(b.level)%").font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(.green)
                             .transition(.blurReplace)
+                    } else if let a = model.accessory {
+                        BatteryRing(level: a.level).transition(.blurReplace)
+                    } else if model.barsHover, let song {
+                        // Hovered, the bars blur into pause (or play): a click there sends the play/pause key.
+                        Image(systemName: song.playing ? "pause.fill" : "play.fill").font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(tint).contentTransition(.symbolEffect(.replace))
+                            .transition(.blurReplace)
                     } else {
-                        MusicBars(playing: song != nil, color: tint, spectrum: model.spectrum)
+                        MusicBars(playing: song?.playing == true, color: tint, spectrum: model.spectrum)
                             .transition(.blurReplace)
                     }
                 }
@@ -190,8 +200,11 @@ struct NotchLive: View {
         .animation(.spring(response: 0.28, dampingFraction: 0.8), value: on) // Quick: a song shows the moment it starts.
         .animation(.spring(response: hoverSpeed, dampingFraction: 0.85), value: model.hover) // Settings › 노치 › 호버 반응 속도.
         .animation(.easeInOut(duration: 0.25), value: model.charge != nil)
+        .animation(.easeInOut(duration: 0.25), value: model.accessory?.id)
         .animation(.easeInOut(duration: 0.3), value: model.hud != nil) // Inner, so it wins over the 0.15 below: the blur swap with the player has time to read.
         .animation(.easeInOut(duration: 0.15), value: model.hud?.symbol)
+        .animation(.easeInOut(duration: 0.25), value: model.barsHover)
+        .animation(.easeInOut(duration: 0.2), value: song?.playing)
         .animation(.easeInOut(duration: 0.45), value: artKey)
         .accessibilityHidden(true)
     }
@@ -208,12 +221,37 @@ struct NotchLive: View {
     }
 }
 
+/// A connected accessory's picture turning in about its vertical axis, the way the Dynamic Island shows AirPods.
+struct SpinIn: View {
+    let symbol: String
+    @State private var turn: Double = -180
+    var body: some View {
+        Image(systemName: symbol).font(.system(size: 15, weight: .medium))
+            .rotation3DEffect(.degrees(turn), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
+            .onAppear { withAnimation(.spring(response: 1.1, dampingFraction: 0.62)) { turn = 360 } }
+    }
+}
+
+/// The accessory's charge as a ring, green, red at 20% and below; a dim empty ring while the level is unknown.
+struct BatteryRing: View {
+    let level: Int?
+    var body: some View {
+        let v = Double(level ?? 0) / 100, color: Color = (level ?? 100) <= 20 ? .red : .green
+        ZStack {
+            Circle().stroke(color.opacity(0.25), lineWidth: 2.5)
+            Circle().trim(from: 0, to: v).stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round)).rotationEffect(.degrees(-90))
+        }
+        .frame(width: 16, height: 16)
+        .animation(.easeOut(duration: 0.6), value: level)
+    }
+}
+
 /// The Dynamic Island's music bars, bass on the left to treble on the right, moving with what the Mac is playing
 /// (`Spectrum`), tinted from the artwork; flat when stopped.
 struct MusicBars: View {
     let playing: Bool, color: Color
     @ObservedObject var spectrum: Spectrum
-    static let count = 6
+    static let count = 4
 
     var body: some View {
         HStack(alignment: .center, spacing: 2) {
@@ -226,13 +264,13 @@ struct MusicBars: View {
     }
 }
 
-/// The Mac's sound output in six bands, bass to treble, 0...1 each. Reads it through a Core Audio process tap (macOS 14.2+;
+/// The Mac's sound output in four bands, bass to treble, 0...1 each. Reads it through a Core Audio process tap (macOS 14.2+;
 /// asks once for System Audio Recording), only while a song plays. Nothing is recorded or kept.
 final class Spectrum: ObservableObject {
     @Published private(set) var levels = [CGFloat](repeating: 0, count: MusicBars.count)
     static let n = 1024
-    /// Band edges in Hz: bass, low-mid, mid, upper-mid, presence, treble.
-    static let edges: [Double] = [40, 150, 400, 1000, 2500, 6000, 16000]
+    /// Band edges in Hz: bass, low-mid, upper-mid, treble.
+    static let edges: [Double] = [40, 250, 1000, 4000, 16000]
     private var tap = AudioObjectID(kAudioObjectUnknown), aggregate = AudioObjectID(kAudioObjectUnknown)
     private var proc: AudioDeviceIOProcID?
     private let queue = DispatchQueue(label: "spectrum", qos: .userInteractive)
@@ -306,6 +344,7 @@ final class Spectrum: ObservableObject {
         let channels = max(Int(b.mNumberChannels), 1), frames = Int(b.mDataByteSize) / 4 / channels
         let f = data.assumingMemoryBound(to: Float.self)
         for i in 0..<frames { samples.append(f[i * channels] + (channels > 1 ? f[i * channels + 1] : 0)) }
+        let gain = Spectrum.gain(volume: Controls.volume ?? 1, muted: Controls.muted)
         while samples.count >= Spectrum.n {
             let block = Array(samples.prefix(Spectrum.n))
             samples.removeFirst(Spectrum.n)
@@ -318,7 +357,7 @@ final class Spectrum: ObservableObject {
                 ceiling[i] = max(db[i], ceiling[i] - 0.5)
                 floor[i] = min(db[i], floor[i] + 0.5)
                 let range = max(ceiling[i] - floor[i], 18) // Wider floor-to-top: a small change moves the bar less.
-                let target: CGFloat = db[i] < -90 ? 0 : CGFloat(min(max((db[i] - floor[i]) / range, 0), 1))
+                let target: CGFloat = db[i] < -90 ? 0 : CGFloat(min(max((db[i] - floor[i]) / range, 0), 1)) * gain
                 // Eased toward it, rising quicker than falling, so bars glide instead of jumping block to block.
                 // ponytail: 0.35 up / 0.12 down per ~21 ms block; lower both for calmer bars.
                 smooth[i] += (target - smooth[i]) * (target > smooth[i] ? 0.35 : 0.12)
@@ -355,6 +394,10 @@ final class Spectrum: ObservableObject {
             return 10 * log10(mean + 1e-12)
         }
     }
+
+    /// How tall the bars may get at this output volume: the tap hears the sound before the volume is applied, so it
+    /// is put back here. The square root keeps them readable at low volumes; muted they lie flat.
+    static func gain(volume: Double, muted: Bool) -> CGFloat { muted ? 0 : CGFloat(min(max(volume, 0), 1).squareRoot()) }
 
     /// For the self-check: the band of a pure tone.
     static func loudestBand(ofTone hz: Double, sampleRate: Double = 48000) -> Int {
@@ -620,13 +663,33 @@ final class Island {
 
 /// What the collapsed notch shows beside itself.
 final class NotchModel: ObservableObject {
-    @Published var nowPlaying: NowPlaying?
+    @Published var nowPlaying: NowPlaying? {
+        didSet {
+            if nowPlaying?.playing == true || nowPlaying == nil { paused = false; pauseToken = nil }
+            else if oldValue?.playing == true {
+                paused = true
+                let t = UUID()
+                pauseToken = t
+                DispatchQueue.main.asyncAfter(deadline: .now() + NotchModel.pauseLinger) { [weak self] in
+                    if self?.pauseToken == t { self?.paused = false }
+                }
+            }
+        }
+    }
+    /// A song just paused stays in the notch this long, to be played again from its bars, as the Dynamic Island keeps it.
+    static let pauseLinger: TimeInterval = 60 // ponytail: fixed; a Settings slider if a minute is wrong for someone.
+    @Published private(set) var paused = false
+    private var pauseToken: UUID?
     /// The volume or brightness key just pressed, shown in the collapsed notch in place of the system's HUD.
     @Published var hud: NotchHUD?
     /// Set for a few seconds after the power adapter goes in: the collapsed notch shows the charge.
     @Published var charge: Battery?
+    /// Set for a few seconds after AirPods connect: the collapsed notch spins their picture in and shows their battery.
+    @Published var accessory: AirPods.Shown?
     /// The cursor is on the notch: it swells a little, so the dwell before opening is felt.
     @Published var hover = false
+    /// The cursor is on the music bars: they show pause (or play), and a click there toggles the song.
+    @Published var barsHover = false
     /// The screen is locked: the song stays private, the notch shows no player.
     @Published var locked = false
     /// The playing sound in bands, for the music bars; it publishes on its own so the rest of the notch is not redrawn with it.
@@ -1168,6 +1231,18 @@ enum RealControlCenter {
         return item
     }
 
+    /// `e` itself or, inside a menu extra's own window or group, the element with this id. On the item's right edge
+    /// the hit is the group around it, not the item, and the walk then stepped past the item: Control Center was not
+    /// found, and the notch opened nothing, for as long as the clock's width put a step exactly on that edge.
+    private static func holder(of id: String, in e: AXUIElement, depth: Int = 2) -> AXUIElement? {
+        if attr(e, kAXIdentifierAttribute) as? String == id { return e }
+        guard depth > 0, frame(e).width < 100 else { return nil } // Not the app's whole menu bar, which is hit between items.
+        for c in attr(e, kAXChildrenAttribute) as? [AXUIElement] ?? [] {
+            if let found = holder(of: id, in: c, depth: depth - 1) { return found }
+        }
+        return nil
+    }
+
     /// The menu bar item with this Accessibility id, found by walking the bar from the right where Apple's sit.
     private static func find(_ id: String) -> AXUIElement? {
         guard AXIsProcessTrusted(), let screen = NSScreen.screens.first else { return nil }
@@ -1177,7 +1252,7 @@ enum RealControlCenter {
         while x > screen.frame.midX {
             var hit: AXUIElement?
             if AXUIElementCopyElementAtPosition(system, Float(x), 12, &hit) == .success, let el = hit {
-                if attr(el, kAXIdentifierAttribute) as? String == id { return el }
+                if let found = holder(of: id, in: el) { return found }
                 var origin = CGPoint.zero
                 if let v = attr(el, kAXPositionAttribute) { AXValueGetValue(v as! AXValue, .cgPoint, &origin) }
                 x = origin.x > 0 && origin.x < x ? origin.x - 1 : x - 6
@@ -2249,6 +2324,27 @@ enum AirPods {
             $0.isConnected() && ($0.name ?? "").localizedCaseInsensitiveContains("AirPods")
         }
     }
+
+    /// What the notch shows when they connect.
+    struct Shown: Equatable { var id = UUID(); let symbol: String, level: Int? }
+
+    static func symbol(for name: String) -> String {
+        let n = name.lowercased()
+        return n.contains("max") ? "airpodsmax" : n.contains("pro") ? "airpods.pro" : "airpods"
+    }
+
+    /// The lower bud, as iOS warns on the weaker one; 0 means not reported. Nil when nothing is known yet.
+    static func level(left: Int, right: Int, combined: Int) -> Int? {
+        let buds = [left, right].filter { $0 > 0 }
+        return buds.min() ?? (combined > 0 ? combined : nil)
+    }
+
+    /// IOBluetooth's private battery getters, read only where the device answers them (KVC on a missing key throws).
+    static func level(of d: IOBluetoothDevice) -> Int? {
+        func get(_ k: String) -> Int { d.responds(to: Selector(k)) ? (d.value(forKey: k) as? Int ?? 0) : 0 }
+        return level(left: get("batteryPercentLeft"), right: get("batteryPercentRight"),
+                     combined: max(get("batteryPercentCombined"), get("batteryPercentSingle")))
+    }
 }
 
 /// Armed once the AirPods signal stays weak (away), fires when it turns strong again (back at the desk).
@@ -2328,13 +2424,27 @@ struct LockedApp: Identifiable {
 }
 
 final class SettingsModel: ObservableObject {
-    @Published var page: SettingsPage? = .general
+    /// Every page change goes on the back stack, like System Settings' ‹ › buttons.
+    @Published var page: SettingsPage? = .general {
+        didSet { if let o = oldValue, o != page, !stepping { back.append(o); forward = [] } }
+    }
+    @Published var back: [SettingsPage] = []
+    @Published var forward: [SettingsPage] = []
+    private var stepping = false
     @Published var hasPassword = false
     @Published var consent: ConsentRecord?
     @Published var loginItem = false
     @Published var faceCount = 0
     @Published var lockedApps: [LockedApp] = []
     @Published var airpodsConnected = false
+
+    func step(forward fwd: Bool) {
+        guard let cur = page, let to = fwd ? forward.popLast() : back.popLast() else { return }
+        if fwd { back.append(cur) } else { forward.append(cur) }
+        stepping = true
+        page = to
+        stepping = false
+    }
 }
 
 struct SettingsActions {
@@ -2363,13 +2473,22 @@ struct SettingsIcon: View {
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
     let actions: SettingsActions
+    @State private var query = ""
+
+    /// System Settings' sidebar: groups split by space, no headers; a search narrows it to one flat list.
+    private var groups: [[SettingsPage]] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        if q.isEmpty { return SettingsPage.groups.map { $0.pages } }
+        let hits = SettingsPage.allCases.filter { $0.title.localizedCaseInsensitiveContains(q) }
+        return hits.isEmpty ? [] : [hits]
+    }
 
     var body: some View {
         NavigationSplitView {
             List(selection: $model.page) {
-                ForEach(SettingsPage.groups, id: \.title) { group in
-                    Section(group.title) {
-                        ForEach(group.pages) { page in
+                ForEach(groups, id: \.self) { pages in
+                    Section {
+                        ForEach(pages) { page in
                             Label {
                                 Text(page.title)
                             } icon: {
@@ -2380,6 +2499,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .searchable(text: $query, placement: .sidebar, prompt: "검색")
             .navigationSplitViewColumnWidth(min: 215, ideal: 215, max: 215)
             .toolbar(removing: .sidebarToggle)
         } detail: {
@@ -2396,6 +2516,14 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
             .navigationTitle(page.title)
+            .toolbar {
+                ToolbarItemGroup(placement: .navigation) {
+                    Button { model.step(forward: false) } label: { Image(systemName: "chevron.left") }
+                        .disabled(model.back.isEmpty).help("뒤로")
+                    Button { model.step(forward: true) } label: { Image(systemName: "chevron.right") }
+                        .disabled(model.forward.isEmpty).help("앞으로")
+                }
+            }
         }
     }
 
@@ -2961,7 +3089,11 @@ final class SettingsFall {
             content.removeFromSuperview()
             content.additionalSafeAreaInsets.top = 0
             window.contentView = content
+            // The notch click went to another app, so Andeville may not be active yet: without this the window
+            // lands behind the front app's windows the moment the floating card hands over to it.
+            NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
             over.orderOut(nil)
             done()
         }
@@ -2981,7 +3113,7 @@ func makeSettingsWindow(_ view: SettingsView) -> NSWindow {
     w.title = "Andeville 설정"
     w.toolbarStyle = .unified
     w.isReleasedWhenClosed = false
-    w.setContentSize(NSSize(width: 760, height: 540))
+    w.setContentSize(NSSize(width: 715, height: 620))
     w.center()
     return w
 }
@@ -3080,6 +3212,10 @@ struct Verifier {
 }
 
 func selfCheck() {
+    assert(AirPods.level(left: 80, right: 40, combined: 0) == 40, "the weaker bud must be shown")
+    assert(AirPods.level(left: 0, right: 60, combined: 90) == 60, "a bud in the case must not count as empty")
+    assert(AirPods.level(left: 0, right: 0, combined: 0) == nil, "no reading must stay unknown")
+    assert(AirPods.symbol(for: "Kim's AirPods Pro") == "airpods.pro" && AirPods.symbol(for: "AirPods Max") == "airpodsmax")
     var ring = EnrollRing()
     for _ in 0..<8 { assert(!ring.feed(turn: 0.05, pitch: 0.1), "settling frames must not fill the ring") }
     assert(!ring.feed(turn: 0.06, pitch: 0.1), "a still head must not fill the ring")
@@ -3224,7 +3360,7 @@ func selfCheck() {
     assert(NowPlaying.parse(Data(#"{"playing":true,"title":"A","artist":"B"}"#.utf8)).map { $0.playing && $0.title == "A" && $0.artist == "B" } == true
            && NowPlaying.parse(Data("{}".utf8)) == nil && NowPlaying.parse(Data("junk".utf8)) == nil, "now playing: a title is required, the rest is read when there")
     assert(Controls.swipeKey(-49) == nil && Controls.swipeKey(-50) == 17 && Controls.swipeKey(80) == 18, "a swipe needs its travel; left is next, right is previous")
-    assert(Spectrum.loudestBand(ofTone: 80) == 0 && Spectrum.loudestBand(ofTone: 700) == 2 && Spectrum.loudestBand(ofTone: 9000) == 5, "a tone lands in its band: bass left, treble right")
+    assert(Spectrum.loudestBand(ofTone: 80) == 0 && Spectrum.loudestBand(ofTone: 700) == 1 && Spectrum.loudestBand(ofTone: 9000) == 3, "a tone lands in its band: bass left, treble right")
     assert(NotchHUD.step(0.5, up: true) == 0.5625 && NotchHUD.step(0.02, up: false) == 0 && NotchHUD.step(1, up: true) == 1 && NotchHUD.step(0.5, up: false, fine: true) == 0.484375, "a key moves one of 16 steps (64 fine) and clamps")
     assert(NotchHUD.volume(0.5, muted: true) == NotchHUD(symbol: "speaker.slash.fill", value: 0) && NotchHUD.volume(1, muted: false).symbol == "speaker.wave.3.fill" && NotchHUD.volume(0.1, muted: false).symbol == "speaker.wave.1.fill", "the volume glyph follows the level, muted reads as zero")
     var lineBuffer = Data()
@@ -3240,6 +3376,7 @@ func selfCheck() {
     assert(lift(0, -10, 0, false).reach == 10 && lift(0, -10, 5, false).reach == 0 && lift(60, -20, 0, false).reach == 64, "pushed against the top edge the cursor goes on up, as far as the orb's top and no further")
     assert(lift(30, 10, 10, true) == (20, 0) && lift(3, 5, 5, true) == (0, 2) && lift(3, 5, 10, true).put == 7, "with the orb in hand the cursor covers the way back down before it moves on screen, and loses none of the move")
     assert(lift(30, 5, 5, false) == (0, nil) && lift(30, 1, 2, false) == (29, nil) && lift(0, -10, 0, true).reach == 0, "without a button held the cursor is never put back, and a drag from elsewhere does not go up")
+    assert(Spectrum.gain(volume: 1, muted: false) == 1 && Spectrum.gain(volume: 0.25, muted: false) == 0.5 && Spectrum.gain(volume: 0.8, muted: true) == 0, "the bars reach full height at full volume, half at a quarter, and lie flat when muted")
     print("self-check ok")
 }
 
@@ -3729,6 +3866,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var plugged: Bool?
     fileprivate var hudTap: CFMachPort?
     private var hudGeneration = 0
+    private var btConnect: IOBluetoothUserNotification?
+    private var btSince = Date()
     private var appCache: [String: LockedApp] = [:]
     private var notchTimer: Timer?
     private var faces = Store.loadFaces()
@@ -3916,6 +4055,20 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let pressed = down && !wasDown
             wasDown = down
             let notch = notchSize(of: screen)
+            // The bars wing: hovered it shows pause or play, a click sends the play/pause key to whichever app plays.
+            let bare = notchRect(in: screen.frame, notch: notch)
+            let song = self.live.nowPlaying
+            let onBars = song != nil && (song!.playing || self.live.paused || self.live.barsHover) && self.live.hud == nil && self.live.charge == nil && self.live.accessory == nil
+                && !self.live.locked && self.real == .idle && self.grip == nil && self.siri == nil
+                && UserDefaults.standard.object(forKey: "liveActivity") as? Bool ?? true
+                && p.x > bare.maxX && cursor(p, isOver: bare.insetBy(dx: -NotchLive.wing - NotchLive.swell, dy: 0))
+            if self.live.barsHover != onBars { self.live.barsHover = onBars }
+            if pressed, onBars, let s = song {
+                Controls.mediaKey(16) // NX_KEYTYPE_PLAY
+                Controls.haptic()
+                // Shown at once; the now-playing stream confirms a moment later.
+                self.live.nowPlaying = NowPlaying(title: s.title, artist: s.artist, playing: !s.playing, artwork: s.artwork)
+            }
             if pressed {
                 let bar = max(notch.height, screen.frame.maxY - screen.visibleFrame.maxY)
                 menuDrag = !overNotch && NSEvent.modifierFlags.contains(.command) && screen.frame.maxY - p.y <= bar
@@ -4020,7 +4173,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             if self.mustLeave { self.mustLeave = false; armed = false; overSince = nil }
             if !overNotch { armed = true }
-            guard overNotch, armed, grab == nil, self.fall == nil else { overSince = nil; return } // A held grab is not a hover.
+            // A held grab is not a hover. A click is meant, so it opens even before the cursor has left the notch:
+            // Control Center closed by a click outside it (on the notch) leaves `armed` off, and the next click was lost.
+            guard overNotch, armed || tapped, grab == nil, self.fall == nil else { overSince = nil; return }
             // A click opens on release (in either mode), so a pull can still become Siri. Settings › 노치 › 여는 방식: 클릭.
             if (Store.hubClickOpen || tapped) && !menuDrag {
                 if tapped { awaySince = nil; self.openNotch(on: screen) }
@@ -4088,6 +4243,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
             Unmanaged<App>.fromOpaque(me).takeUnretainedValue().powerChanged()
         }, Unmanaged.passUnretained(self).toOpaque()).takeRetainedValue()
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+
+        btSince = Date()
+        btConnect = IOBluetoothDevice.register(forConnectNotifications: self, selector: #selector(bluetoothConnected(_:device:)))
 
         var sum: CGFloat = 0, sumUp: CGFloat = 0, fired = false, wingSum: CGFloat = 0
         let swipe: (NSEvent) -> Void = { [weak self] e in
@@ -4236,6 +4394,28 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// AirPods connected: their picture spins in on the left wing, their battery on the right, for a few seconds.
+    @objc private func bluetoothConnected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
+        // Registering reports every device already connected; those are not news.
+        guard Date().timeIntervalSince(btSince) > 3, let name = device.name, name.localizedCaseInsensitiveContains("AirPods") else { return }
+        device.register(forDisconnectNotification: self, selector: #selector(bluetoothDisconnected(_:device:)))
+        // The buds report their charge a moment after the link comes up.
+        // ponytail: one fixed 1.5 s wait; poll a few times if the ring often shows empty.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, device.isConnected() else { return }
+            let shown = AirPods.Shown(symbol: AirPods.symbol(for: name), level: AirPods.level(of: device))
+            self.live.accessory = shown
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                if self?.live.accessory?.id == shown.id { self?.live.accessory = nil }
+            }
+        }
+    }
+
+    @objc private func bluetoothDisconnected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
+        note.unregister()
+        live.accessory = nil
+    }
+
     /// The notch's answer: macOS's own Control Center moved under it. Turned off, or when Control Center cannot be
     /// opened, nothing opens.
     private func openNotch(on screen: NSScreen) {
@@ -4326,7 +4506,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func dropSettings(on screen: NSScreen) {
         if real != .idle { closeReal() }
         let w = settingsReady()
-        guard !w.isVisible, fall == nil else { return w.makeKeyAndOrderFront(nil) }
+        guard !w.isVisible, fall == nil else { w.makeKeyAndOrderFront(nil); return w.orderFrontRegardless() }
         // Lands on the notch's screen (the MacBook's), not whichever screen has the menu bar's focus.
         let v = screen.visibleFrame
         w.setFrameOrigin(NSPoint(x: v.midX - w.frame.width / 2, y: v.midY - w.frame.height / 2))
@@ -4432,7 +4612,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func openSettings() {
-        settingsReady().makeKeyAndOrderFront(nil)
+        let w = settingsReady()
+        w.makeKeyAndOrderFront(nil)
+        w.orderFrontRegardless()
     }
 
     private func settingsReady() -> NSWindow {
