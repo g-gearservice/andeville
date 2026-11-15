@@ -2,6 +2,7 @@ import AppKit
 import Accelerate
 import AVFoundation
 import CoreAudio
+import Combine
 import CoreML
 import CoreImage
 import CryptoKit
@@ -10,9 +11,11 @@ import IOKit.ps
 import LocalAuthentication
 import OpenDirectory
 import Security
+import SceneKit
 import ServiceManagement
 import SwiftUI
 import Vision
+import WebKit
 
 // MARK: - Notch island
 
@@ -113,6 +116,170 @@ struct NotchHUD: Equatable {
     }
 }
 
+/// Settings › 노치 › 메뉴 막대 거울: the strip just under the menu bar, flipped up into the menu bar like a mirror and
+/// misting toward the top. No screen capture: it mirrors only what Andeville draws itself, the Duo page (a snapshot of
+/// its web view) or else the wallpaper. Over another app's window it still shows the wallpaper.
+final class MenuBarMirror {
+    static let shared = MenuBarMirror()
+    private var panel: NSPanel?
+    private let mirror = CALayer()
+    private var ticker: Timer?
+    /// The wallpaper's strip, for this screen and wallpaper.
+    private var still: (key: String, image: CGImage)?
+    private var bar: CGFloat = 0
+    /// The last page snapshot's pixels, and how many snapshots in a row came back the same.
+    private var last: Data?, same = 0, tickCount = 0, inFlight = false
+    /// Locked or with the displays asleep nothing shows the mirror, so it stops reading the page.
+    private var paused = false
+    /// AppKit moves a window under the menu bar's level down out of the menu bar; this one belongs in it.
+    final class Pinned: NSPanel {
+        override func constrainFrameRect(_ r: NSRect, to screen: NSScreen?) -> NSRect { r }
+    }
+
+    init() {
+        let pause: (Bool) -> (Notification) -> Void = { p in { [weak self] _ in self?.paused = p; self?.update() } }
+        let dnc = DistributedNotificationCenter.default(), ws = NSWorkspace.shared.notificationCenter
+        dnc.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main, using: pause(true))
+        dnc.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main, using: pause(false))
+        ws.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main, using: pause(true))
+        ws.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main, using: pause(false))
+    }
+
+    func update() {
+        let on = UserDefaults.standard.object(forKey: "menuBarMirror") as? Bool ?? true
+        DuoMenu.shared.mirrored(on)
+        guard on, !paused, let screen = notchScreen() else { return stop() }
+        bar = screen.frame.maxY - screen.visibleFrame.maxY
+        guard bar > 0 else { return stop() } // Menu bar hidden: nothing to mirror into.
+        let frame = NSRect(x: screen.frame.minX, y: screen.frame.maxY - bar, width: screen.frame.width, height: bar)
+        if let url = NSWorkspace.shared.desktopImageURL(for: screen) {
+            let key = "\(url.path)|\(frame)", scale = screen.backingScaleFactor, size = screen.frame.size
+            let cut = CGRect(x: 0, y: bar * scale, width: size.width * scale, height: bar * scale)
+            if still?.key != key {
+                DispatchQueue.global(qos: .utility).async { [weak self] in
+                    guard let strip = Self.strip(url, size: size, scale: scale, cut: cut) else { return }
+                    DispatchQueue.main.async { self?.setStill(key, strip) }
+                }
+            }
+        }
+        if panel?.frame != frame {
+            panel?.orderOut(nil)
+            let p = Pinned(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            p.animationBehavior = .none
+            p.isOpaque = false
+            p.backgroundColor = .clear
+            p.hasShadow = false
+            p.ignoresMouseEvents = true
+            p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle] // Not in full screen, where the menu bar hides.
+            let v = NSView(frame: NSRect(origin: .zero, size: frame.size))
+            v.wantsLayer = true
+            mirror.frame = v.bounds
+            mirror.contentsGravity = .resize
+            mirror.transform = CATransform3DMakeScale(1, -1, 1) // The mirror: the row nearest the menu bar meets it.
+            v.layer?.addSublayer(mirror)
+            v.layer?.filters = Self.fade(size: frame.size).map { [$0] }
+            p.contentView = v
+            p.setFrame(frame, display: false)
+            panel = p
+        }
+        place()
+        if ticker == nil {
+            // ponytail: polls the page at 60 fps (WebKit says nothing of scrolling on macOS); idle when the page is home.
+            let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.tick() }
+            RunLoop.main.add(t, forMode: .common) // Also while a menu is open or something is dragged.
+            ticker = t
+        }
+        tick()
+    }
+
+    /// Cut the same way as the Duo page's home background, so the two line up.
+    private static func strip(_ url: URL, size: CGSize, scale: CGFloat, cut: CGRect) -> CGImage? {
+        let full: CGImage? = DeskFrame.homeBackground(url, size: size, scale: scale)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        return full?.cropping(to: cut)
+    }
+
+    private func setStill(_ key: String, _ image: CGImage) {
+        still = (key, image)
+        tick()
+    }
+
+    /// The Duo page's strip when it shows a page, else the wallpaper's.
+    private func tick() {
+        guard panel != nil else { return }
+        tickCount += 1
+        // A second of the same picture: down to 15 a second until it changes. One snapshot at a time.
+        if inFlight || same > 60 && tickCount % 4 != 0 { return }
+        guard let web = DuoMenu.shared.pageWeb, web.url != nil, web.window?.isVisible == true else {
+            if let img = still?.image, mirror.contents as! CGImage? !== img { show(img) }
+            return
+        }
+        let c = WKSnapshotConfiguration()
+        c.rect = CGRect(x: 0, y: bar, width: web.bounds.width, height: bar) // From the top left: just under the bar.
+        c.afterScreenUpdates = false
+        c.snapshotWidth = NSNumber(value: Double(web.bounds.width / 2)) // Half: the blur hides it, and it halves the work.
+        inFlight = true
+        web.takeSnapshot(with: c) { [weak self] img, _ in
+            self?.inFlight = false
+            guard let self, self.panel != nil, let cg = img?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+            let px = cg.dataProvider?.data as Data?
+            if px != nil, px == self.last { self.same += 1; return } // The same frame: nothing to redraw.
+            self.last = px
+            self.same = 0
+            self.show(cg)
+        }
+    }
+
+    private func show(_ img: CGImage) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mirror.contents = img
+        CATransaction.commit()
+    }
+
+    /// The blur deepening toward the top: sharp where the mirror meets the screen, misted where it meets the edge.
+    /// Core Animation's own variable blur (private `CAFilter`, as `Backdrop` uses), masked by a vertical ramp.
+    /// ponytail: `defaults write com.ggear.faytai mirrorBlur -float <pt>` sets the top's blur radius (default 14).
+    private static func fade(size: CGSize) -> NSObject? {
+        guard let cls = NSClassFromString("CAFilter") as? NSObject.Type,
+              let f = cls.perform(NSSelectorFromString("filterWithType:"), with: "variableBlur")?.takeUnretainedValue() as? NSObject,
+              let ctx = CGContext(data: nil, width: 1, height: max(Int(size.height), 2), bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue) else { return nil }
+        let h = CGFloat(ctx.height)
+        let ramp = CGGradient(colorsSpace: nil, colors: [CGColor(gray: 0, alpha: 1), CGColor(gray: 0, alpha: 0)] as CFArray, locations: [0, 1])!
+        // The filter reads the mask with its first row at the bottom: the context's bottom (full) ends up at the top.
+        ctx.drawLinearGradient(ramp, start: .zero, end: CGPoint(x: 0, y: h), options: [])
+        guard let mask = ctx.makeImage() else { return nil }
+        let r = UserDefaults.standard.object(forKey: "mirrorBlur") as? Double ?? 14
+        f.setValue(r, forKey: "inputRadius")
+        f.setValue(mask, forKey: "inputMaskImage")
+        f.setValue(true, forKey: "inputNormalizeEdges")
+        return f
+    }
+
+    /// With Duo on, just under its cover and over macOS's menu bar, which the cover's blur used to hide; otherwise
+    /// under the menu bar's titles and icons (the bar itself is see-through on macOS 26).
+    func place() {
+        guard let p = panel else { return }
+        if let cover = DuoMenu.shared.cover {
+            p.level = cover.level
+            p.order(.below, relativeTo: cover.windowNumber)
+        } else {
+            p.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue - 1)
+            p.orderFrontRegardless()
+        }
+    }
+
+    private func stop() {
+        ticker?.invalidate()
+        ticker = nil
+        last = nil
+        inFlight = false
+        panel?.orderOut(nil)
+        panel = nil
+        mirror.contents = nil
+    }
+}
+
 /// The collapsed notch's live activity: while a song plays, the notch grows a wing each side, artwork left and a
 /// waveform right; plugging in the power adapter shows the charge there for a moment. Otherwise the bare notch shape.
 struct NotchLive: View {
@@ -120,7 +287,8 @@ struct NotchLive: View {
     let notch: CGSize
     /// The menu bar's height: hovered, the notch reaches down to its bottom edge and no further.
     var bar: CGFloat = 0
-    @AppStorage("liveActivity") private var enabled = true
+    @AppStorage("liveActivity") private var liveActivity = true
+    private var enabled: Bool { liveActivity && model.liveUp }
     @AppStorage("hoverSpeed") private var hoverSpeed = Store.hoverSpeedDefault
     @AppStorage("notchEar") private var ear = Store.notchEarDefault // Redraws live when the slider moves.
     static let wing: CGFloat = 44
@@ -149,7 +317,7 @@ struct NotchLive: View {
                         Image(systemName: "bolt.fill").font(.system(size: 13)).foregroundStyle(.green)
                             .transition(.blurReplace)
                     } else if let a = model.accessory {
-                        SpinIn(symbol: a.symbol).id(a.id).transition(.blurReplace)
+                        SpinIn(shown: a).id(a.id).transition(.blurReplace)
                     } else {
                         // A new song's picture blurs in over the old one blurring out.
                         ZStack {
@@ -221,14 +389,80 @@ struct NotchLive: View {
     }
 }
 
-/// A connected accessory's picture turning in about its vertical axis, the way the Dynamic Island shows AirPods.
+/// The connected AirPods turning as one pair about their vertical axis, as the Dynamic Island shows them on iPhone: two
+/// buds facing front, a half turn in which they close into one bud seen side on, a pause, then two buds again. Apple's
+/// own 3D model of them (`Buds3D`), else the SF Symbol.
 struct SpinIn: View {
-    let symbol: String
-    @State private var turn: Double = -180
+    let shown: AirPods.Shown
     var body: some View {
-        Image(systemName: symbol).font(.system(size: 15, weight: .medium))
-            .rotation3DEffect(.degrees(turn), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
-            .onAppear { withAnimation(.spring(response: 1.1, dampingFraction: 0.62)) { turn = 360 } }
+        if let scene = Buds3D.cached(shown.model) {
+            Buds3D(scene: scene).frame(width: 30, height: 18)
+        } else {
+            Image(systemName: shown.max ? "airpodsmax" : "airpods.pro").font(.system(size: 12, weight: .medium))
+        }
+    }
+}
+
+/// Apple's AR model of the AirPods (the `.usdz` apple.com shows in AR, built into the app from `AirPods3D/`), the case
+/// left out, turning from the first frame the notch starts to widen: one whole turn without a stop, ending front on,
+/// after which the notch closes again.
+struct Buds3D: NSViewRepresentable {
+    let scene: (SCNScene, SCNNode)
+
+    func makeNSView(context: Context) -> SCNView {
+        let v = SCNView(frame: .zero, options: nil)
+        v.backgroundColor = .clear
+        v.antialiasingMode = .multisampling4X
+        v.autoenablesDefaultLighting = true
+        v.rendersContinuously = true
+        v.scene = scene.0
+        v.isPlaying = true
+        // The scene is kept between connections: back to front, then straight into the turn, fastest at the start
+        // so it is already moving as the notch widens.
+        scene.1.removeAllActions()
+        scene.1.eulerAngles.y = 0
+        let turn = SCNAction.rotateBy(x: 0, y: .pi * 2 * Buds3D.turns, z: 0, duration: Buds3D.spin)
+        turn.timingMode = .easeOut
+        scene.1.runAction(turn)
+        return v
+    }
+    func updateNSView(_ v: SCNView, context: Context) {}
+
+    /// Models already read, by name. Main thread only. Read at launch (`preload`), as a 6 MB model read when the
+    /// AirPods connect holds up the notch's first frames.
+    private static var loaded: [String: (SCNScene, SCNNode)] = [:]
+    static let models = ["airpods-pro", "airpods-mid", "airpods-max-midnight"]
+    /// Whole turns, and how long they take; the notch closes `spin` plus a breath after the AirPods connect.
+    static let turns: CGFloat = 1, spin: TimeInterval = 4.8
+
+    static func preload() {
+        DispatchQueue.global(qos: .utility).async {
+            for m in models { if let l = load(m) { DispatchQueue.main.async { loaded[m] = loaded[m] ?? l } } }
+        }
+    }
+
+    static func cached(_ name: String) -> (SCNScene, SCNNode)? {
+        if loaded[name] == nil { loaded[name] = load(name) } // Connected before the preload got there.
+        return loaded[name]
+    }
+
+    /// The model's scene with only the buds shown (the part standing highest; the case sits below them), turning about
+    /// their own center, and a camera that fits them to a 30 by 18 point view. Nil when the model is not in the app.
+    static func load(_ name: String) -> (SCNScene, SCNNode)? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "usdz"),
+              let s = try? SCNScene(url: url), let group = s.rootNode.childNodes.first?.childNodes.first else { return nil }
+        let parts = group.childNodes.filter { $0.boundingBox.max.x > $0.boundingBox.min.x }
+        guard let buds = parts.max(by: { $0.boundingBox.min.y < $1.boundingBox.min.y }) else { return nil }
+        if parts.count > 1 { parts.filter { $0 !== buds }.forEach { $0.isHidden = true } } // A lone part (AirPods Max) is the whole thing.
+        let (lo, hi) = buds.boundingBox
+        buds.pivot = SCNMatrix4MakeTranslation((lo.x + hi.x) / 2, (lo.y + hi.y) / 2, (lo.z + hi.z) / 2)
+        let width = max(hi.x - lo.x, (hi.y - lo.y) * 30 / 18) * 1.1, distance: CGFloat = 60
+        let cam = SCNNode(); cam.camera = SCNCamera()
+        cam.camera!.projectionDirection = .horizontal
+        cam.camera!.fieldOfView = 2 * atan(width / 2 / distance) * 180 / .pi
+        cam.position = SCNVector3(0, 0, distance)
+        s.rootNode.addChildNode(cam)
+        return (s, buds)
     }
 }
 
@@ -238,10 +472,10 @@ struct BatteryRing: View {
     var body: some View {
         let v = Double(level ?? 0) / 100, color: Color = (level ?? 100) <= 20 ? .red : .green
         ZStack {
-            Circle().stroke(color.opacity(0.25), lineWidth: 2.5)
-            Circle().trim(from: 0, to: v).stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round)).rotationEffect(.degrees(-90))
+            Circle().stroke(color.opacity(0.25), lineWidth: 2)
+            Circle().trim(from: 0, to: v).stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
         }
-        .frame(width: 16, height: 16)
+        .frame(width: 13, height: 13)
         .animation(.easeOut(duration: 0.6), value: level)
     }
 }
@@ -692,6 +926,12 @@ final class NotchModel: ObservableObject {
     @Published var barsHover = false
     /// The screen is locked: the song stays private, the notch shows no player.
     @Published var locked = false
+    /// The app in front is in full screen on the notch's screen.
+    @Published var fullScreen = false
+    /// The live activity is not hidden away (Settings › 노치 › 자동으로 가리기 및 보기), or the cursor brought it back.
+    @Published var liveUp = true
+    /// The live activity may show: on in Settings, and not hidden away.
+    var liveShown: Bool { Store.liveActivity && liveUp }
     /// The playing sound in bands, for the music bars; it publishes on its own so the rest of the notch is not redrawn with it.
     let spectrum = Spectrum()
 }
@@ -1248,6 +1488,9 @@ enum RealControlCenter {
         guard AXIsProcessTrusted(), let screen = NSScreen.screens.first else { return nil }
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.1)
+        // The Duo style's cover sits over the menu bar and would be what every point hits: see through it meanwhile.
+        DuoMenu.seeThrough(true)
+        defer { DuoMenu.seeThrough(false) }
         var x = screen.frame.maxX - 2
         while x > screen.frame.midX {
             var hit: AXUIElement?
@@ -2318,19 +2561,38 @@ final class ChirpProbe {
 enum PresenceMode: String { case sonar, auto, airpods }
 
 enum AirPods {
-    // ponytail: matched by name, so renamed AirPods are missed; match the product ID (system_profiler) if that matters.
+    /// Apple's earbuds and headphones, renamed or not: Apple's Bluetooth vendor ID on an audio-class device.
+    static func isApple(_ d: IOBluetoothDevice) -> Bool {
+        d.deviceClassMajor == BluetoothDeviceClassMajor(kBluetoothDeviceClassMajorAudio) && int(d, "vendorID") == 0x4C
+    }
+
     static func connected() -> IOBluetoothDevice? {
-        (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice])?.first {
-            $0.isConnected() && ($0.name ?? "").localizedCaseInsensitiveContains("AirPods")
-        }
+        (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice])?.first { $0.isConnected() && isApple($0) }
+    }
+
+    /// IOBluetooth's private getters, read only where the device answers them (KVC on a missing key throws).
+    private static func int(_ d: IOBluetoothDevice, _ k: String) -> Int {
+        d.responds(to: Selector(k)) ? (d.value(forKey: k) as? Int ?? 0) : 0
     }
 
     /// What the notch shows when they connect.
-    struct Shown: Equatable { var id = UUID(); let symbol: String, level: Int? }
+    struct Shown {
+        var id = UUID(); let address: String, max: Bool; var level: Int?
+        /// Apple's AR model to turn in the notch: AirPods Max, AirPods Pro, else the plain AirPods (4).
+        var model: String { max ? "airpods-max-midnight" : pro ? "airpods-pro" : "airpods-mid" }
+        var pro = false
+    }
 
-    static func symbol(for name: String) -> String {
-        let n = name.lowercased()
-        return n.contains("max") ? "airpodsmax" : n.contains("pro") ? "airpods.pro" : "airpods"
+    /// AirPods Max (product IDs 0x200A, 0x201F, 0x2025) are drawn as headphones, the rest as buds.
+    static func isMax(productID: Int) -> Bool { [8202, 8223, 8237].contains(productID) }
+
+    /// AirPods Pro, 2 (Lightning and USB-C) and 3: product IDs 0x200E, 0x2014, 0x2024, 0x2027.
+    /// ponytail: a new Pro shows as plain AirPods until its ID is added here.
+    static func isPro(productID: Int) -> Bool { [8206, 8212, 8228, 8231].contains(productID) }
+
+    static func shown(_ d: IOBluetoothDevice) -> Shown {
+        let id = int(d, "productID")
+        return Shown(address: d.addressString ?? "", max: isMax(productID: id), level: level(of: d), pro: isPro(productID: id))
     }
 
     /// The lower bud, as iOS warns on the weaker one; 0 means not reported. Nil when nothing is known yet.
@@ -2339,11 +2601,9 @@ enum AirPods {
         return buds.min() ?? (combined > 0 ? combined : nil)
     }
 
-    /// IOBluetooth's private battery getters, read only where the device answers them (KVC on a missing key throws).
     static func level(of d: IOBluetoothDevice) -> Int? {
-        func get(_ k: String) -> Int { d.responds(to: Selector(k)) ? (d.value(forKey: k) as? Int ?? 0) : 0 }
-        return level(left: get("batteryPercentLeft"), right: get("batteryPercentRight"),
-                     combined: max(get("batteryPercentCombined"), get("batteryPercentSingle")))
+        level(left: int(d, "batteryPercentLeft"), right: int(d, "batteryPercentRight"),
+              combined: max(int(d, "batteryPercentCombined"), int(d, "batteryPercentSingle")))
     }
 }
 
@@ -2375,21 +2635,21 @@ struct AirPodsPresence {
 // MARK: - Settings window
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, appearance, face, appLock, sensitivity, labs
+    case general, notch, controlCenter, face, appLock, labs
     var id: String { rawValue }
 
     /// Sidebar sections: the notch first, face unlock as one of its features.
     static let groups: [(title: String, pages: [SettingsPage])] = [
-        ("노치", [.general, .appearance]), ("얼굴 잠금", [.face, .appLock, .sensitivity]), ("실험", [.labs]),
+        ("일반", [.general, .notch, .controlCenter]), ("얼굴 잠금", [.face, .appLock]), ("실험", [.labs]),
     ]
 
     var title: String {
         switch self {
         case .general: return "일반"
-        case .appearance: return "모양"
-        case .face: return "얼굴"
+        case .notch: return "노치"
+        case .controlCenter: return "제어 센터"
+        case .face: return "Face ID"
         case .appLock: return "앱 잠금"
-        case .sensitivity: return "인식 감도"
         case .labs: return "실험실"
         }
     }
@@ -2397,24 +2657,14 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: return "gearshape.fill"
-        case .appearance: return "paintpalette.fill"
+        case .notch: return "capsule.fill"
+        case .controlCenter: return "switch.2"
         case .face: return "faceid"
         case .appLock: return "lock.app.dashed"
-        case .sensitivity: return "slider.horizontal.3"
         case .labs: return "flask.fill"
         }
     }
 
-    var tint: Color {
-        switch self {
-        case .general: return .gray
-        case .appearance: return .pink
-        case .face: return .green
-        case .appLock: return .blue
-        case .sensitivity: return .orange
-        case .labs: return .purple
-        }
-    }
 }
 
 struct LockedApp: Identifiable {
@@ -2459,14 +2709,14 @@ struct SettingsActions {
 
 struct SettingsIcon: View {
     let symbol: String
-    let tint: Color
 
+    /// One blue for every page, as Bartender's settings do.
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 12, weight: .medium))
+            .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(.white)
-            .frame(width: 22, height: 22)
-            .background(tint.gradient, in: RoundedRectangle(cornerRadius: 5.5, style: .continuous))
+            .frame(width: 24, height: 24)
+            .background(Color(red: 0.20, green: 0.47, blue: 0.96), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 
@@ -2475,27 +2725,39 @@ struct SettingsView: View {
     let actions: SettingsActions
     @State private var query = ""
 
-    /// System Settings' sidebar: groups split by space, no headers; a search narrows it to one flat list.
-    private var groups: [[SettingsPage]] {
+    /// Bartender's sidebar: the first group bare, the ones below under a small header; a search narrows it to one flat list.
+    private var groups: [(title: String, pages: [SettingsPage])] {
         let q = query.trimmingCharacters(in: .whitespaces)
-        if q.isEmpty { return SettingsPage.groups.map { $0.pages } }
+        if q.isEmpty { return SettingsPage.groups.enumerated().map { ($0.offset == 0 ? "" : $0.element.title, $0.element.pages) } }
         let hits = SettingsPage.allCases.filter { $0.title.localizedCaseInsensitiveContains(q) }
-        return hits.isEmpty ? [] : [hits]
+        return hits.isEmpty ? [] : [("", hits)]
     }
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $model.page) {
-                ForEach(groups, id: \.self) { pages in
+            // ponytail: buttons, not List selection, for Bartender's gray pill (the sidebar highlight is always the accent
+            // color); arrow keys no longer walk the pages.
+            List {
+                ForEach(groups, id: \.pages) { group in
                     Section {
-                        ForEach(pages) { page in
-                            Label {
-                                Text(page.title)
-                            } icon: {
-                                SettingsIcon(symbol: page.symbol, tint: page.tint)
+                        ForEach(group.pages) { page in
+                            Button { model.page = page } label: {
+                                Label {
+                                    Text(page.title).font(.system(size: 13, weight: .semibold))
+                                } icon: {
+                                    SettingsIcon(symbol: page.symbol)
+                                }
+                                .padding(.vertical, 4).padding(.horizontal, 6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(model.page == page ? Color.primary.opacity(0.12) : .clear,
+                                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .contentShape(Rectangle())
                             }
-                            .tag(page)
+                            .buttonStyle(.plain)
+                            .listRowInsets(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: 0))
                         }
+                    } header: {
+                        if !group.title.isEmpty { Text(group.title) }
                     }
                 }
             }
@@ -2507,10 +2769,10 @@ struct SettingsView: View {
             Group {
                 switch page {
                 case .general: GeneralPage(model: model, actions: actions)
-                case .appearance: AppearancePage(model: model)
+                case .notch: NotchPage()
+                case .controlCenter: ControlCenterPage()
                 case .face: facePage
                 case .appLock: AppLockPage(model: model, actions: actions)
-                case .sensitivity: SensitivityPage()
                 case .labs: LabsPage(model: model)
                 }
             }
@@ -2544,31 +2806,105 @@ struct SettingsView: View {
                     Button("테스트", action: actions.test).disabled(model.faceCount == 0)
                 }
             }
+            SensitivityPage() // Recognition settings, on the same Face ID page.
         }
     }
 }
 
-struct AppearancePage: View {
-    @ObservedObject var model: SettingsModel
-    @AppStorage("hubRealCC") private var realCC = true
+/// Where the live activity hides itself, as macOS offers for the menu bar.
+enum LiveHide: String, CaseIterable {
+    case always, desktop, fullScreen, never
+    var title: String {
+        switch self {
+        case .always: return "항상"
+        case .desktop: return "데스크탑에서만"
+        case .fullScreen: return "전체 화면에서만"
+        case .never: return "안 함"
+        }
+    }
+}
+
+/// A seconds slider, for the notch's and Control Center's timings.
+func timeSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double> = 0.15...1.2, step: Double = 0.05) -> some View {
+    LabeledContent(title) {
+        HStack {
+            Slider(value: value, in: range, step: step).frame(width: 190).labelsHidden()
+            Text(String(format: "%.2f초", value.wrappedValue)).monospacedDigit().foregroundStyle(.secondary).frame(width: 46, alignment: .trailing)
+        }
+    }
+}
+
+/// Settings › 노치: the live activity beside the notch, and the notch's own look.
+struct NotchPage: View {
+    @AppStorage("liveActivity") private var liveActivity = true
+    @AppStorage("liveHide") private var liveHide = LiveHide.never.rawValue
+    @AppStorage("notchGestures") private var notchGestures = true
+    @AppStorage("notchHUD") private var notchHUD = true
+    @AppStorage("haptics") private var haptics = true
+    @AppStorage("hoverSpeed") private var hoverSpeed = Store.hoverSpeedDefault
     @AppStorage("notchEar") private var notchEar = Store.notchEarDefault
+    @AppStorage("menuBarMirror") private var menuBarMirror = true
 
     var body: some View {
         Form {
             Section {
-                Toggle("노치에서 macOS 제어 센터 열기", isOn: $realCC)
+                Toggle("라이브 활동 (재생 중인 곡 · 충전을 노치 옆에 표시)", isOn: $liveActivity)
+                Picker("자동으로 가리기 및 보기", selection: $liveHide) {
+                    ForEach(LiveHide.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
+                }
+                .disabled(!liveActivity)
+                Toggle("노치에서 두 손가락 스와이프로 이전 · 다음 곡", isOn: $notchGestures)
+                Toggle("음량 · 밝기 키를 노치에 표시 (시스템 HUD 대신)", isOn: $notchHUD)
+                Toggle("트랙패드 햅틱", isOn: $haptics)
+            } header: {
+                Text("라이브 활동")
             } footer: {
-                Text("켜면 노치에 커서를 올렸을 때 macOS의 실제 제어 센터가 노치 바로 아래에 열립니다. 모듈 추가·배치는 제어 센터 아래의 '컨트롤 편집'에서 macOS 그대로 합니다. 끄면 노치에서 아무것도 열리지 않습니다. 전체 화면 앱에서는 메뉴 막대가 내려온 뒤에 제어 센터가 열립니다. Andeville 설정은 노치를 오른쪽 클릭해 엽니다.")
+                Text("자동으로 가리면 그곳에서는 노치 옆 표시가 숨고 음악 막대를 위한 소리 읽기도 멈춥니다. 커서를 화면 맨 위로 올리면 다시 나타납니다. 음량 · 밝기 표시는 가리지 않습니다.")
             }
             Section {
+                timeSlider("호버 반응 속도", value: $hoverSpeed, range: 0.1...1.2)
                 LabeledContent("모서리 라운드") {
                     HStack {
                         Slider(value: $notchEar, in: Store.notchEarRange, step: 1).frame(width: 190).labelsHidden()
                         Text("\(Int(notchEar))pt").monospacedDigit().foregroundStyle(.secondary).frame(width: 46, alignment: .trailing)
                     }
                 }
+                Toggle("메뉴 막대 거울 (바로 아래 Duo 화면 · 배경화면을 뒤집어 비춤)", isOn: $menuBarMirror)
+            } header: {
+                Text("모양")
             } footer: {
-                Text("노치의 둥근 모서리 크기입니다. 화면 상단과 만나는 곳과 접힌 노치 아래쪽 모서리가 같은 값으로 둥글어집니다. 데스크톱과 잠금화면에서 항상 표시되며, 노치와 Face ID 표시에 같이 적용됩니다. 기본값이자 최소값은 7pt입니다.")
+                Text("호버 반응 속도는 커서를 올렸을 때 노치가 살짝 커지는 데 걸리는 시간입니다. 모서리 라운드는 노치의 둥근 모서리 크기로, 화면 상단과 만나는 곳과 접힌 노치 아래쪽 모서리가 같은 값으로 둥글어집니다. 데스크톱과 잠금화면에서 항상 표시되며, 노치와 Face ID 표시에 같이 적용됩니다. 기본값이자 최소값은 7pt입니다.")
+            }
+        }
+    }
+}
+
+/// Settings › 제어 센터: how the notch opens macOS's Control Center, and how it moves.
+struct ControlCenterPage: View {
+    @AppStorage("hubRealCC") private var realCC = true
+    @AppStorage("hubClickOpen") private var hubClickOpen = false
+    @AppStorage("hubLeave") private var hubLeave = Store.hubTimingDefault.leave
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("노치에서 macOS 제어 센터 열기", isOn: $realCC)
+                Picker("여는 방식", selection: $hubClickOpen) {
+                    Text("노치에 커서 올리기").tag(false)
+                    Text("노치 클릭").tag(true)
+                }
+            } footer: {
+                Text("켜면 노치에 커서를 올리거나(또는 노치를 클릭하면) macOS의 실제 제어 센터가 노치 바로 아래에 열립니다. 모듈 추가·배치는 제어 센터 아래의 '컨트롤 편집'에서 macOS 그대로 합니다. 끄면 노치에서 아무것도 열리지 않습니다. 전체 화면 앱에서는 메뉴 막대가 내려온 뒤에 제어 센터가 열립니다. Andeville 설정은 노치를 오른쪽 클릭해 엽니다.")
+            }
+            Section {
+                timeSlider("닫힘 감지 속도", value: $hubLeave, range: 0...0.6, step: 0.01)
+                LabeledContent("기본값으로 되돌리기") {
+                    Button("되돌리기") { hubLeave = Store.hubTimingDefault.leave }
+                }
+            } header: {
+                Text("움직임")
+            } footer: {
+                Text("커서를 올리면 노치가 바로 열립니다. 닫힘 감지 속도는 커서가 제어 센터 밖으로 나간 뒤 닫히기까지의 시간이고, 0초면 바로 닫힙니다. 제어 센터가 펼치고 접히는 움직임은 macOS가 정합니다.")
             }
         }
     }
@@ -2643,27 +2979,6 @@ struct GeneralPage: View {
     @State private var updateStatus = ""
     @State private var downloadURL: URL?
     @State private var checking = false
-    @AppStorage("hubOpen") private var hubOpen = Store.hubTimingDefault.open
-    @AppStorage("hubClose") private var hubClose = Store.hubTimingDefault.close
-    @AppStorage("hubDwell") private var hubDwell = Store.hubTimingDefault.dwell
-    @AppStorage("hubLeave") private var hubLeave = Store.hubTimingDefault.leave
-    @AppStorage("hubBounce") private var hubBounce = Store.hubBounceDefault
-    @AppStorage("hoverSpeed") private var hoverSpeed = Store.hoverSpeedDefault
-    @AppStorage("hubClickOpen") private var hubClickOpen = false
-    @AppStorage("liveActivity") private var liveActivity = true
-    @AppStorage("notchGestures") private var notchGestures = true
-    @AppStorage("haptics") private var haptics = true
-    @AppStorage("notchHUD") private var notchHUD = true
-
-    private func timeSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double> = 0.15...1.2, step: Double = 0.05) -> some View {
-        LabeledContent(title) {
-            HStack {
-                Slider(value: value, in: range, step: step).frame(width: 190).labelsHidden()
-                Text(String(format: "%.2f초", value.wrappedValue)).monospacedDigit().foregroundStyle(.secondary).frame(width: 46, alignment: .trailing)
-            }
-        }
-    }
-
 
     private var version: String {
         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -2679,41 +2994,6 @@ struct GeneralPage: View {
 
     var body: some View {
         Form {
-            Section {
-                Picker("여는 방식", selection: $hubClickOpen) {
-                    Text("노치에 커서 올리기").tag(false)
-                    Text("노치 클릭").tag(true)
-                }
-                Toggle("라이브 활동 (재생 중인 곡 · 충전을 노치 옆에 표시)", isOn: $liveActivity)
-                Toggle("노치에서 두 손가락 스와이프로 이전 · 다음 곡", isOn: $notchGestures)
-                Toggle("음량 · 밝기 키를 노치에 표시 (시스템 HUD 대신)", isOn: $notchHUD)
-                Toggle("트랙패드 햅틱", isOn: $haptics)
-                timeSlider("감지 속도", value: $hubDwell, range: 0...0.5, step: 0.01).disabled(hubClickOpen)
-                timeSlider("닫힘 감지 속도", value: $hubLeave, range: 0...0.6, step: 0.01)
-                timeSlider("호버 반응 속도", value: $hoverSpeed, range: 0.1...1.2)
-                timeSlider("펼치는 속도", value: $hubOpen)
-                timeSlider("접히는 속도", value: $hubClose)
-                LabeledContent("튕김") {
-                    HStack {
-                        Slider(value: $hubBounce, in: 0...0.6, step: 0.02).frame(width: 190).labelsHidden()
-                        Text(hubBounce == 0 ? "끔" : "\(Int((hubBounce * 100).rounded()))%").monospacedDigit().foregroundStyle(.secondary).frame(width: 46, alignment: .trailing)
-                    }
-                }
-                LabeledContent("기본값으로 되돌리기") {
-                    Button("되돌리기") {
-                        hubDwell = Store.hubTimingDefault.dwell
-                        hubLeave = Store.hubTimingDefault.leave
-                        hubOpen = Store.hubTimingDefault.open
-                        hubClose = Store.hubTimingDefault.close
-                        hubBounce = Store.hubBounceDefault
-                        hoverSpeed = Store.hoverSpeedDefault
-                    }
-                }
-            } header: {
-                Text("노치")
-            } footer: {
-                Text("데스크톱에서 노치에 커서를 올리거나(또는 노치를 클릭하면) 열리는 제어 센터의 여는 방식과 동작 속도입니다. 노치 클릭에서는 감지 속도를 쓰지 않습니다. 펼치는·접히는 속도는 다음에 열 때부터 적용됩니다. 감지 속도는 노치에 커서가 머물러야 열리는 시간, 닫힘 감지 속도는 커서가 제어 센터 밖으로 나간 뒤 닫히기까지의 시간이고(0초면 즉시, 두 감지 속도는 바로 적용), 호버 반응 속도는 커서를 올렸을 때 노치가 살짝 커지는 데 걸리는 시간, 펼치는·접히는 속도는 움직이는 데 걸리는 시간입니다. 모두 짧을수록 빠릅니다. 튕김은 펼쳐질 때(얼굴 잠금 표시 포함) 끝에서 살짝 넘쳤다 돌아오는 정도이고, 0이면 튕기지 않습니다. 접힐 때는 노치 밖으로 넘치지 않도록 튕기지 않습니다.")
-            }
             Section {
                 Toggle("잠금화면 해제", isOn: Binding(get: { model.hasPassword }, set: { _ in actions.togglePassword() }))
                 LabeledContent("키체인 동의") {
@@ -2870,7 +3150,7 @@ struct SensitivityPage: View {
     }
 
     var body: some View {
-        Form {
+        Group {
             Section {
                 slider("얼굴 일치 기준", value: $distance, range: 0.3...0.7, step: 0.01, format: "%.2f")
                 slider("실물 판정 기준", value: $live, range: 0...1, step: 0.01, format: "%.2f")
@@ -2929,8 +3209,25 @@ struct LabsPage: View {
             } footer: {
                 Text(footer)
             }
+            Section {
+                Toggle(isOn: $desk) {
+                    Text("데스크톱 브라우저")
+                    Text(desk ? "켜짐" : "꺼짐")
+                }
+                TextField("홈 주소", text: $deskURL, prompt: Text("비어 있음"))
+                Toggle(isOn: $duo) {
+                    Text("데스크 브라우저 + 아이폰 듀오 스타일")
+                    Text(duo ? "켜짐" : "꺼짐")
+                }
+            } footer: {
+                Text("바탕화면 전체를 클릭하고 입력할 수 있는 브라우저로 바꿉니다. 다른 창들 뒤에 깔려 있고, 창을 치우면(데스크톱 보기) 바로 쓸 수 있습니다. 바탕화면 아이콘은 가려집니다. 처음에는 빈 페이지로 열리고, 집 버튼을 누르면 홈 주소로 갑니다. 주소창에는 주소나 검색어를 넣고, ⌘L 주소창 · ⌘R 새로고침 · ⌘[ ⌘] 뒤로/앞으로를 쓸 수 있습니다.\n\n듀오 스타일: 페이지가 화면 전체를 채우고, 주소는 왼쪽 위에 작게 표시됩니다(눌러서 입력). 오른쪽에는 와이파이, 세로 독, 뒤로·앞으로·새로고침·홈 버튼이 놓입니다. 메뉴 막대는 노치 안에 접혀 있다가, 노치에서 왼쪽으로 쓸면 앱의 텍스트 메뉴가, 오른쪽으로 쓸면 앱·시스템 메뉴 아이콘이 펼쳐집니다. 반대로 쓸거나 커서가 메뉴 막대를 떠나면 다시 접힙니다. 이때 노치의 좌우 쓸기로 곡을 넘기는 기능은 꺼집니다. 시스템 설정 › 메뉴 막대에서 '메뉴 막대 자동으로 가리기'를 '항상'으로 두면 macOS 메뉴 막대와 겹치지 않습니다.")
+            }
         }
     }
+
+    @AppStorage(DeskBrowser.onKey) private var desk = false
+    @AppStorage(DeskBrowser.duoKey) private var duo = false
+    @AppStorage(DeskBrowser.urlKey) private var deskURL = ""
 
     private var footer: String {
         let common = "잠금 중에 자리를 비웠다가 돌아오면 자동으로 얼굴 인식을 시작합니다. 앉은 채로 잠갔다면 자리를 비웠다가 돌아와야 하고, 그 전에는 노치에 커서를 올려 주세요. 선택한 방식의 손잡이를 좌우로 밀어 민감도를 조절합니다(왼쪽 낮음, 오른쪽 높음). Auto에서는 두 감지의 민감도를 함께 맞춥니다. 민감도를 높이면 더 잘 감지하지만 사람이 없어도 시작될 수 있습니다. 선택된 손잡이를 누르면 꺼지고 켜집니다."
@@ -3212,10 +3509,23 @@ struct Verifier {
 }
 
 func selfCheck() {
+    assert(DeskBrowser.normalize("naver.com")?.absoluteString == "https://naver.com", "a bare domain must open as a site")
+    assert(DeskBrowser.normalize("맥 배경화면")?.host == "www.google.com", "words must become a search")
+    assert(DeskBrowser.normalize("http://a.b/c")?.absoluteString == "http://a.b/c", "a full URL must stay as typed")
+    assert(DeskBrowser.normalize("  ") == nil, "blank input must not navigate")
+    assert(DuoRing.image != nil, "the Duo status bar's Wi-Fi SVG must load")
+    assert(DeskBrowser.normalize("localhost:3000")?.absoluteString == "http://localhost:3000", "a local dev server must open, not search")
+    let visited = [DeskHistory.Entry(url: "https://blog.naver.com/x", title: "블로그"), DeskHistory.Entry(url: "https://www.naver.com/", title: "NAVER")]
+    assert(DeskHistory.rank(visited, "naver").first?.title == "NAVER", "an address starting with what was typed must come first")
+    assert(DeskHistory.rank(visited, "블로그").count == 1, "a title must match too")
+    assert(DeskHistory.rank(visited, " ").isEmpty, "nothing typed, no suggestions")
+    for m in Buds3D.models where Bundle.main.url(forResource: m, withExtension: "usdz") != nil {
+        assert(Buds3D.load(m) != nil, "\(m).usdz must load with its buds found")
+    }
     assert(AirPods.level(left: 80, right: 40, combined: 0) == 40, "the weaker bud must be shown")
     assert(AirPods.level(left: 0, right: 60, combined: 90) == 60, "a bud in the case must not count as empty")
     assert(AirPods.level(left: 0, right: 0, combined: 0) == nil, "no reading must stay unknown")
-    assert(AirPods.symbol(for: "Kim's AirPods Pro") == "airpods.pro" && AirPods.symbol(for: "AirPods Max") == "airpodsmax")
+    assert(AirPods.isMax(productID: 8237) && !AirPods.isMax(productID: 8231), "AirPods Max must be told from buds by product ID")
     var ring = EnrollRing()
     for _ in 0..<8 { assert(!ring.feed(turn: 0.05, pitch: 0.1), "settling frames must not fill the ring") }
     assert(!ring.feed(turn: 0.06, pitch: 0.1), "a still head must not fill the ring")
@@ -3511,27 +3821,32 @@ enum Store {
     }
 
     /// The island's open/close animation lengths in seconds; Settings › 일반 › 노치.
-    static let hubTimingDefault = (open: 0.4, close: 0.45, dwell: 0.08, leave: 0.1)
-    /// Overshoot of the opening spring, 0 (none) to 0.6; Settings › 일반 › 노치 › 튕김. Spring damping is 1 - this.
+    static let hubTimingDefault = (open: 0.4, close: 0.45, leave: 0.1)
+    /// Overshoot of the Face ID island's opening spring (fixed). Spring damping is 1 - this.
     static let hubBounceDefault = 0.26
     /// How long the notch takes to swell under the cursor; Settings › 일반 › 노치 › 호버 반응 속도.
     static let hoverSpeedDefault = 0.5
-    static var hubBounce: Double {
-        UserDefaults.standard.object(forKey: "hubBounce") == nil ? hubBounceDefault : min(max(UserDefaults.standard.double(forKey: "hubBounce"), 0), 0.6)
-    }
+    static let hubBounce = hubBounceDefault
     /// How long the cursor may be off Control Center before it closes; 0 closes on exit.
     static var hubLeave: Double {
         UserDefaults.standard.object(forKey: "hubLeave") == nil ? hubTimingDefault.leave : max(UserDefaults.standard.double(forKey: "hubLeave"), 0)
     }
-    /// How long the cursor must rest on the notch before it opens; 0 opens on contact.
-    static var hubDwell: Double {
-        UserDefaults.standard.object(forKey: "hubDwell") == nil ? hubTimingDefault.dwell : max(UserDefaults.standard.double(forKey: "hubDwell"), 0)
-    }
+    /// The notch opens on contact (no dwell).
+    static let hubDwell = 0.0
     /// The notch opens macOS's own Control Center under it (on unless turned off).
     static var hubRealCC: Bool { UserDefaults.standard.object(forKey: "hubRealCC") as? Bool ?? true }
     /// Andeville's island behind macOS's Control Center, with the blur in and out (on unless turned off).
     /// The collapsed notch's live activity, swipe gestures and trackpad ticks (all on unless turned off).
     static var liveActivity: Bool { UserDefaults.standard.object(forKey: "liveActivity") as? Bool ?? true }
+    /// Settings › 노치 › 자동으로 가리기 및 보기: the live activity hides here (back while the cursor is at the top).
+    static func liveHides(fullScreen: Bool) -> Bool {
+        switch LiveHide(rawValue: UserDefaults.standard.string(forKey: "liveHide") ?? "") ?? .never {
+        case .always: return true
+        case .desktop: return !fullScreen
+        case .fullScreen: return fullScreen
+        case .never: return false
+        }
+    }
     static var notchGestures: Bool { UserDefaults.standard.object(forKey: "notchGestures") as? Bool ?? true }
     static var notchHUD: Bool { UserDefaults.standard.object(forKey: "notchHUD") as? Bool ?? true }
     /// Keeps the display and the Mac awake while the screen is locked (off unless turned on).
@@ -3539,14 +3854,7 @@ enum Store {
     static var haptics: Bool { UserDefaults.standard.object(forKey: "haptics") as? Bool ?? true }
     /// Hub opens on a notch click instead of a hover.
     static var hubClickOpen: Bool { UserDefaults.standard.bool(forKey: "hubClickOpen") }
-    static var hubOpen: Double {
-        let v = UserDefaults.standard.double(forKey: "hubOpen")
-        return v > 0 ? v : hubTimingDefault.open
-    }
-    static var hubClose: Double {
-        let v = UserDefaults.standard.double(forKey: "hubClose")
-        return v > 0 ? v : hubTimingDefault.close
-    }
+    static let hubOpen = hubTimingDefault.open, hubClose = hubTimingDefault.close
 
 
     static var lockedApps: [String] {
@@ -3803,6 +4111,28 @@ func notchSize(of screen: NSScreen) -> CGSize {
     return CGSize(width: screen.frame.width - l.width - r.width, height: screen.safeAreaInsets.top)
 }
 
+/// The app in front shows a full-screen window on this screen (macOS's own full screen, read through Accessibility:
+/// on a notched Mac the window sits below the notch, so its size alone looks like a zoomed one). Nil while Andeville
+/// itself is in front, which says nothing about the space under it.
+func fullScreenApp(on screen: NSScreen) -> Bool? {
+    guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+    guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
+    let top = NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY, f = screen.frame
+    let area = CGRect(x: f.minX, y: top - f.maxY, width: f.width, height: f.height) // AX positions are top-left based.
+    var list: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute as CFString, &list) == .success,
+          let windows = list as? [AXUIElement] else { return false }
+    return windows.contains { w in
+        var full: CFTypeRef?, pos: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(w, "AXFullScreen" as CFString, &full) == .success, full as? Bool == true else { return false }
+        var p = CGPoint.zero
+        if AXUIElementCopyAttributeValue(w, kAXPositionAttribute as CFString, &pos) == .success, let pos {
+            AXValueGetValue(pos as! AXValue, .cgPoint, &p)
+        }
+        return area.contains(CGPoint(x: p.x + 1, y: p.y + 1))
+    }
+}
+
 func notchScreen() -> NSScreen? { NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main }
 
 func notchRect(in frame: NSRect, notch: CGSize) -> NSRect {
@@ -3861,13 +4191,15 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var rightOnNotch = false // A right press that began on the notch: its release is kept too.
     private var fall: SettingsFall?
     private lazy var notchBase = NotchBase(model: live)
+    private let menuBarMirror = MenuBarMirror.shared
     private var nowPlayingStream: Process?
     private var swipeMonitors: [Any?] = []
     private var plugged: Bool?
     fileprivate var hudTap: CFMachPort?
     private var hudGeneration = 0
     private var btConnect: IOBluetoothUserNotification?
-    private var btSince = Date()
+    /// The Apple headphones connected at the last look; one newly in this set is what the notch announces.
+    private var headphones: Set<String>?
     private var appCache: [String: LockedApp] = [:]
     private var notchTimer: Timer?
     private var faces = Store.loadFaces()
@@ -3928,8 +4260,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        Buds3D.preload()
         setUpNotch()
         notchBase.update()
+        menuBarMirror.update()
         setUpLive()
         setUpHUD()
         setUpGripTap()
@@ -3945,11 +4279,19 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         wc.addObserver(self, selector: #selector(appActivated(_:)), name: NSWorkspace.didActivateApplicationNotification, object: nil)
         wc.addObserver(self, selector: #selector(appQuit(_:)), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         wc.addObserver(self, selector: #selector(screensDidWake), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        wc.addObserver(self, selector: #selector(checkFullScreen), name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+        wc.addObserver(self, selector: #selector(checkFullScreen), name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(checkFullScreen), name: UserDefaults.didChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(checkFullScreen), name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        checkFullScreen()
+        // Hidden away, the live activity comes back while the cursor is at the top, as the menu bar does: watched.
+        liveWatch = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in self?.updateLiveUp() }
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(screenDidLock), name: .init("com.apple.screenIsLocked"), object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(screenDidUnlock), name: .init("com.apple.screenIsUnlocked"), object: nil)
         checkConsent()
         airpodsWatch = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.airpodsTick() }
         airpodsTick()
+        DeskBrowser.shared.start()
     }
 
     /// Auto mode: AirPods worn (connected) use the AirPods check, taken off (disconnected) go back to ultrasound.
@@ -4015,6 +4357,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func updateNotchBase() {
         DispatchQueue.main.async {
             self.notchBase.update()
+            self.menuBarMirror.update()
         }
     }
 
@@ -4060,7 +4403,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let song = self.live.nowPlaying
             let onBars = song != nil && (song!.playing || self.live.paused || self.live.barsHover) && self.live.hud == nil && self.live.charge == nil && self.live.accessory == nil
                 && !self.live.locked && self.real == .idle && self.grip == nil && self.siri == nil
-                && UserDefaults.standard.object(forKey: "liveActivity") as? Bool ?? true
+                && self.live.liveShown
                 && p.x > bare.maxX && cursor(p, isOver: bare.insetBy(dx: -NotchLive.wing - NotchLive.swell, dy: 0))
             if self.live.barsHover != onBars { self.live.barsHover = onBars }
             if pressed, onBars, let s = song {
@@ -4182,7 +4525,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return
             }
             if overSince == nil { overSince = now }
-            // Dwell (Settings › 노치 › 감지 속도), so a cursor passing over the top edge does not open it.
+            // Dwell is 0: the notch opens on contact.
             if now.timeIntervalSince(overSince!) >= Store.hubDwell {
                 overSince = nil
                 awaySince = nil
@@ -4225,7 +4568,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
             } else {
                 self.live.nowPlaying = n
             }
-            if self.live.nowPlaying?.playing == true { self.live.spectrum.start() } else { self.live.spectrum.stop() } // Sound is read only while a song plays.
+            self.updateSpectrum()
         }
         nowPlayingStream?.terminationHandler = { [weak self] p in
             log("now playing reader exited \(p.terminationStatus), restarting")
@@ -4244,8 +4587,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }, Unmanaged.passUnretained(self).toOpaque()).takeRetainedValue()
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
 
-        btSince = Date()
+        // The connect notification is instant but has proved unreliable on reconnects; the half-second look catches those.
         btConnect = IOBluetoothDevice.register(forConnectNotifications: self, selector: #selector(bluetoothConnected(_:device:)))
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.checkHeadphones() }
 
         var sum: CGFloat = 0, sumUp: CGFloat = 0, fired = false, wingSum: CGFloat = 0
         let swipe: (NSEvent) -> Void = { [weak self] e in
@@ -4257,7 +4601,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let p = NSEvent.mouseLocation, ax = CGPoint(x: p.x, y: (NSScreen.screens.first?.frame.maxY ?? 0) - p.y)
             // On the player's wings, up and down set the level: the artwork side brightness, the bars side volume.
             if let self, self.real == .idle, !self.live.locked, self.live.nowPlaying?.playing == true,
-               UserDefaults.standard.object(forKey: "liveActivity") as? Bool ?? true,
+               self.live.liveShown,
                cursor(p, isOver: bare.insetBy(dx: -NotchLive.wing - NotchLive.swell, dy: 0)), !cursor(p, isOver: bare) {
                 let dy = e.isDirectionInvertedFromDevice ? -e.scrollingDeltaY : e.scrollingDeltaY
                 let steps: Int
@@ -4275,6 +4619,15 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard !fired, cursor(p, isOver: rect) || overCC else { return }
             let knob = UserDefaults.standard.double(forKey: "swipeTravel")
             let travel = knob > 0 ? knob : 50
+            // Duo style: sideways on the notch (or on Control Center while it is open) unfolds the menu bar (fingers left
+            // the text menus, right the icons).
+            if DuoMenu.shared.on, abs(e.scrollingDeltaX) >= abs(e.scrollingDeltaY) {
+                sum += e.scrollingDeltaX
+                guard wheel ? sum != 0 : abs(sum) >= travel / 2 else { return }
+                fired = true
+                DuoMenu.shared.swipe(fingersLeft: (e.isDirectionInvertedFromDevice ? sum : -sum) < 0)
+                return Controls.haptic()
+            }
             // Fingers (or the wheel) moving down, whichever way "natural scrolling" is set.
             sumUp += e.isDirectionInvertedFromDevice ? -e.scrollingDeltaY : e.scrollingDeltaY
             // Moving up while Control Center is open (over it or the notch): it folds away.
@@ -4290,7 +4643,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 fired = true
                 return self.openNotch(on: screen) // Its own haptic.
             }
-            guard Store.notchGestures, !wheel else { return } // Song swipes are trackpad only.
+            guard Store.notchGestures, !wheel, !DuoMenu.shared.on else { return } // Song swipes are trackpad only.
             sum += e.scrollingDeltaX
             guard let key = Controls.swipeKey(sum, travel: travel) else { return }
             fired = true // One song per swipe, however far it goes.
@@ -4394,26 +4747,24 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// AirPods connected: their picture spins in on the left wing, their battery on the right, for a few seconds.
-    @objc private func bluetoothConnected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
-        // Registering reports every device already connected; those are not news.
-        guard Date().timeIntervalSince(btSince) > 3, let name = device.name, name.localizedCaseInsensitiveContains("AirPods") else { return }
-        device.register(forDisconnectNotification: self, selector: #selector(bluetoothDisconnected(_:device:)))
-        // The buds report their charge a moment after the link comes up.
-        // ponytail: one fixed 1.5 s wait; poll a few times if the ring often shows empty.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self, device.isConnected() else { return }
-            let shown = AirPods.Shown(symbol: AirPods.symbol(for: name), level: AirPods.level(of: device))
-            self.live.accessory = shown
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
-                if self?.live.accessory?.id == shown.id { self?.live.accessory = nil }
-            }
-        }
-    }
+    @objc private func bluetoothConnected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) { checkHeadphones() }
 
-    @objc private func bluetoothDisconnected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
-        note.unregister()
-        live.accessory = nil
+    /// AirPods connected: they spin in on the left wing at once, their battery fills the ring on the right as the buds
+    /// report it, and both stay until the buds have turned (`Buds3D.spin`). Those already connected when the app starts are not news.
+    private func checkHeadphones() {
+        let now = (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] ?? []).filter { $0.isConnected() && AirPods.isApple($0) }
+        let addresses = Set(now.compactMap(\.addressString))
+        defer { headphones = addresses }
+        if let shown = live.accessory, !addresses.contains(shown.address) { live.accessory = nil } // Gone again.
+        if let shown = live.accessory, shown.level == nil, let d = now.first(where: { $0.addressString == shown.address }) {
+            live.accessory?.level = AirPods.level(of: d)
+        }
+        guard let before = headphones, let d = now.first(where: { !before.contains($0.addressString ?? "") }) else { return }
+        let shown = AirPods.shown(d)
+        live.accessory = shown
+        DispatchQueue.main.asyncAfter(deadline: .now() + Buds3D.spin + 0.4) { [weak self] in // Closes once they have turned.
+            if self?.live.accessory?.id == shown.id { self?.live.accessory = nil }
+        }
     }
 
     /// The notch's answer: macOS's own Control Center moved under it. Turned off, or when Control Center cannot be
@@ -4955,7 +5306,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func screenDidLock() {
-        let wings = Store.liveActivity && live.nowPlaying?.playing == true
+        let wings = live.liveShown && live.nowPlaying?.playing == true
         live.locked = true // The wings fold in right now, during the transition.
         notchBase.sitOutLock(hold: wings ? 0.3 : 0)
         log("screen locked")
@@ -5034,6 +5385,46 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         unlockedApps.remove(id)
     }
 
+    /// Full screen in or out (a space change, an app brought forward, the setting flipped): the live activity and
+    /// the sound it reads follow. Checked again once the space's slide has settled and its windows are listed.
+    @objc private func checkFullScreen() {
+        let check = { [weak self] in
+            guard let self, let screen = notchScreen() else { return }
+            guard let full = fullScreenApp(on: screen) else { return self.updateSpectrum() }
+            if self.live.fullScreen != full { self.live.fullScreen = full }
+            self.updateLiveUp()
+            self.updateSpectrum()
+        }
+        check()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: check)
+    }
+
+    private var liveWatch: Timer?
+    private var liveAwaySince: Date?
+
+    /// Whether the live activity shows: unless hidden away here, or while the cursor is in the menu bar's strip at the top.
+    private func updateLiveUp() {
+        guard let screen = notchScreen() else { return }
+        let strip = max(screen.safeAreaInsets.top, 24)
+        let up = !Store.liveHides(fullScreen: live.fullScreen) || screen.frame.maxY - NSEvent.mouseLocation.y <= strip
+        // The menu bar waits a moment after the cursor leaves before it slides up; the wings wait with it.
+        // ponytail: 0.2 s by eye against macOS's bar; raise if the wings still fold first.
+        if up { liveAwaySince = nil } else if live.liveUp {
+            if liveAwaySince == nil { liveAwaySince = Date() }
+            guard Date().timeIntervalSince(liveAwaySince!) >= 0.2 else { return }
+        }
+        guard live.liveUp != up else { return }
+        live.liveUp = up
+        // After the wings have moved: tearing the audio tap down (or setting it up) blocks the main thread a moment,
+        // which held the fold back behind the menu bar's.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.updateSpectrum() }
+    }
+
+    /// Sound is read only while a song plays and its bars can show: not with the live activity off or hidden in full screen.
+    private func updateSpectrum() {
+        if live.nowPlaying?.playing == true && live.liveShown { live.spectrum.start() } else { live.spectrum.stop() }
+    }
+
     @objc private func appActivated(_ n: Notification) {
         guard !faces.isEmpty, let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
               let id = app.bundleIdentifier, Store.lockedApps.contains(id), !unlockedApps.contains(id) else { return }
@@ -5061,6 +5452,1309 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         withCamera {
             self.verify(island: true, seconds: 8) { ok in ok ? done(true) : fallback() }
         }
+    }
+}
+
+// MARK: - Desktop browser experiment
+
+/// Settings › 실험실 › 데스크톱 브라우저: the desktop itself becomes a live browser, one per screen,
+/// just above Finder's icons (so clicks land here) and below every normal window. Each desktop (Space) has its own,
+/// made the first time that desktop is shown, so its pages stay with it.
+final class DeskBrowser {
+    static let shared = DeskBrowser()
+    static let onKey = "deskBrowserOn", urlKey = "deskBrowserURL", duoKey = "deskDuoOn"
+    private var frames: [CGDirectDisplayID: [DeskFrame]] = [:]
+    private var shownOn = false, shownDuo = false
+
+    /// The address set in Settings › 실험실, or nil when none is set (then pages start blank, as in Safari).
+    static var home: URL? { normalize(UserDefaults.standard.string(forKey: urlKey) ?? "") }
+
+    /// "naver.com" opens the site, "맥 배경화면" searches, a full URL stays as typed.
+    static func normalize(_ input: String) -> URL? {
+        let s = input.trimmingCharacters(in: .whitespaces)
+        if s.isEmpty { return nil }
+        if s.contains("://") { return URL(string: s) }
+        if s.hasPrefix("localhost"), !s.contains(" ") { return URL(string: "http://" + s) }
+        if s.contains("."), !s.contains(" ") { return URL(string: "https://" + s) }
+        var q = URLComponents(string: "https://www.google.com/search")!
+        q.queryItems = [URLQueryItem(name: "q", value: s)]
+        return q.url
+    }
+
+    func start() {
+        sync()
+        FourFingerSwipe.start { [weak self] in self?.revealAddress() }
+        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.sync() }
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.shownOn else { return }
+            self.rebuild(true)
+        }
+        // Waits out the slide, so the full-screen check sees the new front app.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                guard let self, self.shownOn else { return }
+                self.rebuild(true)
+            }
+        }
+    }
+
+    private func sync() {
+        let duo = UserDefaults.standard.bool(forKey: Self.duoKey)
+        let on = UserDefaults.standard.bool(forKey: Self.onKey) || duo // The Duo style is the browser in another layout.
+        guard on != shownOn || duo != shownDuo else { return }
+        if duo != shownDuo { frames.values.joined().forEach { $0.window.close() }; frames = [:] } // Other layout: new windows.
+        shownDuo = duo
+        rebuild(on)
+    }
+
+    /// macOS reports "screen changed" for the Dock hiding, waking from sleep and the like, so a screen that is still
+    /// there keeps its windows and pages and is only resized; only a screen plugged in or out gains or loses them.
+    /// The desktop on show gets its own window if it has none yet (not a full-screen app's Space, which has no desktop).
+    private func rebuild(_ on: Bool) {
+        shownOn = on
+        var next: [CGDirectDisplayID: [DeskFrame]] = [:]
+        for s in on ? NSScreen.screens : [] {
+            let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
+            let r = s.frame // Up to the notch, behind the menu bar.
+            var list = frames.removeValue(forKey: id) ?? []
+            for f in list where f.window.frame != r { f.window.setFrame(r, display: true) }
+            // A removed desktop hands its windows to the one on show: keep one there.
+            let here = list.filter { $0.window.isOnActiveSpace }
+            for f in here.dropFirst() { f.window.close() }
+            list.removeAll { f in here.dropFirst().contains { $0 === f } }
+            if here.isEmpty, fullScreenApp(on: s) != true { list.append(DeskFrame(screen: s, duo: shownDuo)) }
+            next[id] = list
+        }
+        frames.values.joined().forEach { $0.window.close() }
+        frames = next
+        DuoMenu.shared.set(on: on && shownDuo)
+    }
+
+    /// Four fingers moving down: the address bar of the screen under the cursor comes down, ready for field.
+    private func revealAddress() {
+        guard shownOn else { return }
+        let p = NSEvent.mouseLocation
+        frames.values.joined().first { $0.window.isOnActiveSpace && $0.window.frame.contains(p) }?.revealAddress()
+    }
+}
+
+/// Four fingers moving down the trackpad, from its raw touches (MultitouchSupport, private: scroll events don't say
+/// how many fingers there are). Called on the main thread, once per swipe.
+/// ponytail: the 96-byte touch layout every macOS so far uses; check it first if swipes stop registering.
+enum FourFingerSwipe {
+    private typealias Callback = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, Int32, Double, Int32) -> Int32
+    private static var onSwipe: (() -> Void)?
+    private static var startY: Float?, fired = false
+
+    static func start(_ action: @escaping () -> Void) {
+        onSwipe = action
+        guard let h = dlopen("/System/Library/PrivateFrameworks/MultitouchSupport.framework/MultitouchSupport", RTLD_NOW),
+              let list = dlsym(h, "MTDeviceCreateList"), let reg = dlsym(h, "MTRegisterContactFrameCallback"),
+              let run = dlsym(h, "MTDeviceStart") else { return }
+        typealias List = @convention(c) () -> Unmanaged<CFArray>?
+        typealias Reg = @convention(c) (UnsafeMutableRawPointer?, Callback) -> Void
+        typealias Run = @convention(c) (UnsafeMutableRawPointer?, Int32) -> Void
+        guard let devices = unsafeBitCast(list, to: List.self)()?.takeRetainedValue() as? [AnyObject] else { return }
+        for d in devices {
+            let dev = Unmanaged.passUnretained(d).toOpaque()
+            unsafeBitCast(reg, to: Reg.self)(dev, frame)
+            unsafeBitCast(run, to: Run.self)(dev, 0)
+        }
+    }
+
+    /// One frame of touches, on MultitouchSupport's own thread.
+    private static let frame: Callback = { _, touches, count, _, _ in
+        guard count == 4, let touches else {
+            if count == 0 { DispatchQueue.main.async { startY = nil; fired = false } }
+            return 0
+        }
+        var y: Float = 0 // Average height on the pad, 0 at the bottom edge, 1 at the top (normalized.pos.y, byte 36).
+        for i in 0..<4 { y += touches.load(fromByteOffset: i * 96 + 36, as: Float.self) / 4 }
+        DispatchQueue.main.async {
+            guard !fired else { return }
+            guard let s = startY else { startY = y; return }
+            if s - y > 0.12 { fired = true; onSwipe?() } // ponytail: 12% of the pad's height; lower for a shorter swipe.
+        }
+        return 0
+    }
+}
+
+private final class DeskWindow: NSWindow {
+    /// A ⌘ shortcut (key as typed, with or without ⇧); true when it was used.
+    var onCommand: ((String, Bool) -> Bool)?
+    override var canBecomeKey: Bool { true } // Borderless windows refuse typing otherwise.
+    override var canBecomeMain: Bool { true }
+
+    /// Andeville has no Edit or browser menus, so the usual shortcuts are wired here.
+    override func performKeyEquivalent(with e: NSEvent) -> Bool {
+        let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.subtracting(.shift) == .command, let k = e.charactersIgnoringModifiers?.lowercased()
+        else { return super.performKeyEquivalent(with: e) }
+        let shift = flags.contains(.shift)
+        let edit = ["c": #selector(NSText.copy(_:)), "v": #selector(NSText.paste(_:)), "x": #selector(NSText.cut(_:)),
+                    "a": #selector(NSText.selectAll(_:)), "z": Selector(shift ? "redo:" : "undo:")]
+        if let s = edit[k], !shift || k == "z" { return NSApp.sendAction(s, to: nil, from: self) }
+        return onCommand?(k, shift) ?? super.performKeyEquivalent(with: e)
+    }
+}
+
+/// The desktop browser sits under every window, so the click that brings it forward must also press the button.
+private final class FirstClickButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// Pages visited in the desk browser, newest first, for the address bar's suggestions.
+enum DeskHistory {
+    struct Entry: Equatable { let url: String, title: String }
+    static let key = "deskHistory"
+
+    static func all() -> [Entry] {
+        (UserDefaults.standard.array(forKey: key) as? [[String]] ?? []).compactMap { $0.count == 2 ? Entry(url: $0[0], title: $0[1]) : nil }
+    }
+
+    static func add(url: String, title: String) {
+        let list = [Entry(url: url, title: title)] + all().filter { $0.url != url }
+        UserDefaults.standard.set(list.prefix(500).map { [$0.url, $0.title] }, forKey: key) // ponytail: 500 newest; trim by age if it grows.
+    }
+
+    /// Entries whose address starts with what was typed come first (scheme and www. ignored), then any containing it.
+    static func rank(_ entries: [Entry], _ typed: String, limit: Int = 6) -> [Entry] {
+        let q = typed.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return [] }
+        func bare(_ u: String) -> String {
+            var s = u.lowercased()
+            for p in ["https://", "http://", "www."] where s.hasPrefix(p) { s.removeFirst(p.count) }
+            return s
+        }
+        let starts = entries.filter { bare($0.url).hasPrefix(bare(q)) }
+        let contains = entries.filter { !starts.contains($0) && ($0.url.lowercased().contains(q) || $0.title.lowercased().contains(q)) }
+        return Array((starts + contains).prefix(limit))
+    }
+}
+
+private final class DeskTab {
+    let web: WKWebView
+    var icon: NSImage?
+    var watches: [NSKeyValueObservation] = []
+    init(web: WKWebView) { self.web = web }
+}
+
+private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, NSTextFieldDelegate {
+    let window: DeskWindow
+    let field = NSTextField()
+    private var tabs: [DeskTab] = []
+    private var current = 0
+    var web: WKWebView { tabs[current].web }
+    /// Holds the current tab's page.
+    private let pageHost = NSView()
+    /// The browser's home: the screen's wallpaper, blurred toward the right, over a blank tab.
+    private let homeView = NSImageView()
+    /// The pull-down bar (four fingers down, ⌘L): the address, then the tabs, or suggestions while typing.
+    private let addressBar = NSVisualEffectView()
+    private var barRow = NSView()
+    private let tabStrip = NSView()
+    private let suggestionBox = NSView()
+    private var suggestions: [DeskHistory.Entry] = []
+    private var picked = -1
+    /// ⌘F: the bar's field searches the page instead.
+    private var finding = false
+    private let progress = NSView()
+    private let toast = NSTextField(labelWithString: "")
+    private var toastTimer: Timer?
+    private var downloads: [WKDownload: URL] = [:]
+    /// The band at the top the page scrolls under (the notch's, or the menu bar's).
+    private let topInset: CGFloat
+    private let onNotchScreen: Bool
+    /// The page's prefers-color-scheme follows the system theme, live (a desktop-level window misses the change otherwise).
+    private var theme: NSKeyValueObservation?
+    private var tintColor: () -> Void = {}
+
+    init(screen: NSScreen, duo: Bool = false) {
+        let r = screen.frame // The whole screen, up to the notch.
+        window = DeskWindow(contentRect: r, styleMask: .borderless, backing: .buffered, defer: false)
+        topInset = screen.safeAreaInsets.top > 0 ? notchSize(of: screen).height : screen.frame.maxY - screen.visibleFrame.maxY
+        onNotchScreen = duo && screen == notchScreen()
+        super.init()
+        window.isReleasedWhenClosed = false
+        window.level = NSWindow.Level(Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
+        window.collectionBehavior = [.stationary, .ignoresCycle] // Stays on the desktop it was made on.
+        window.setFrame(r, display: true)
+        window.onCommand = { [weak self] k, shift in self?.command(k, shift: shift) ?? false }
+        theme = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { [weak self] app, _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.window.appearance = NSAppearance(named: app.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) ?? .aqua)
+                self.window.appearance?.performAsCurrentDrawingAppearance { self.tintColor() } // Resolved in the new theme.
+            }
+        }
+
+        field.placeholderString = "주소 또는 검색어"
+        field.target = self
+        field.action = #selector(go)
+        field.delegate = self
+
+        let root = NSView(frame: NSRect(origin: .zero, size: r.size))
+        pageHost.frame = root.bounds
+        // Before macOS 26 the page can't scroll under the band, so it stops below it.
+        if #unavailable(macOS 26.0) { pageHost.frame.size.height -= topInset }
+        pageHost.autoresizingMask = [.width, .height]
+        homeView.frame = root.bounds
+        homeView.autoresizingMask = [.width, .height]
+        homeView.imageScaling = .scaleAxesIndependently // Already cut to the screen's shape.
+        progress.frame = NSRect(x: 0, y: r.height - topInset - 2, width: 0, height: 2)
+        progress.autoresizingMask = [.minYMargin]
+        progress.wantsLayer = true
+        progress.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        [pageHost, homeView, progress].forEach(root.addSubview)
+
+        if duo {
+            // Duo: the page fills the screen, the address in the pull-down bar, and the buttons in the rail on the
+            // right (wifi, a vertical dock, the browser's own controls).
+            let dock = screen.frame.maxX - screen.visibleFrame.maxX // The real Dock's width when it stands on the right.
+            let rail = DuoRailHost(rootView: DuoRail(back: { [weak self] in self?.back() }, forward: { [weak self] in self?.forward() },
+                                                        reload: { [weak self] in self?.reload() }, home: { [weak self] in self?.home() },
+                                                        center: dock > 0 ? dock / 2 : 36))
+            rail.sizingOptions = []
+            rail.frame = NSRect(x: r.width - DuoRail.hostWidth, y: 0, width: DuoRail.hostWidth, height: r.height - topInset)
+            rail.autoresizingMask = [.minXMargin, .height]
+            root.addSubview(rail)
+            field.isBordered = false // Just the text; the rail has the buttons.
+            field.drawsBackground = false
+            field.focusRingType = .none
+            field.font = .systemFont(ofSize: 15)
+            field.frame = NSRect(x: 16, y: 12, width: 0, height: 20)
+            field.autoresizingMask = [.width]
+            barRow.addSubview(field)
+        } else {
+            let row = NSStackView(views: [
+                button("chevron.left", #selector(back)), button("chevron.right", #selector(forward)),
+                button("arrow.clockwise", #selector(reload)), field, button("house", #selector(home)),
+            ])
+            row.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
+            barRow = row
+        }
+        addressBar.material = .hudWindow
+        addressBar.blendingMode = .withinWindow
+        addressBar.state = .active
+        addressBar.wantsLayer = true
+        addressBar.layer?.cornerRadius = 14
+        addressBar.layer?.masksToBounds = true
+        addressBar.isHidden = true
+        addressBar.frame.size.width = min(720, r.width - 80)
+        addressBar.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin]
+        // A tint in the theme's own background colour, so the text reads over a bright page as well as a dark one.
+        let tint = NSView()
+        tint.wantsLayer = true
+        tint.autoresizingMask = [.width, .height]
+        tintColor = { [weak tint] in tint?.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.6).cgColor }
+        [tint, barRow, tabStrip, suggestionBox].forEach(addressBar.addSubview)
+        root.addSubview(addressBar)
+
+        toast.font = .systemFont(ofSize: 13, weight: .medium)
+        toast.alignment = .center
+        toast.wantsLayer = true
+        toast.drawsBackground = true
+        toast.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.92)
+        toast.layer?.cornerRadius = 10
+        toast.isHidden = true
+        toast.autoresizingMask = [.minXMargin, .maxXMargin]
+        root.addSubview(toast)
+        window.contentView = root
+        if duo { field.frame.size.width = addressBar.frame.width - 32 }
+
+        let size = r.size, scale = screen.backingScaleFactor
+        let wallpaper = NSWorkspace.shared.desktopImageURL(for: screen)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let img = wallpaper.flatMap { Self.homeBackground($0, size: size, scale: scale) }
+            DispatchQueue.main.async { self?.homeView.image = img }
+        }
+        newTab()
+        layoutBar()
+        window.orderFront(nil)
+        // Starts blank. Focusing the field here would force this desktop-level window to become key, which macOS
+        // keeps undoing — the window flickers. Four fingers (or a click) bring the address bar instead.
+    }
+
+    // MARK: Shortcuts
+
+    private func command(_ k: String, shift: Bool) -> Bool {
+        switch (k, shift) {
+        case ("l", false): revealAddress()
+        case ("t", false): newTab(); revealAddress()
+        case ("w", false): closeTab(current)
+        case ("r", false): web.reload()
+        case ("[", false): web.goBack()
+        case ("]", false): web.goForward()
+        case ("{", true), ("[", true): select((current + tabs.count - 1) % tabs.count)
+        case ("}", true), ("]", true): select((current + 1) % tabs.count)
+        case ("f", false): startFind()
+        case ("g", _): find(backwards: shift)
+        case ("=", _), ("+", _): web.pageZoom = min(3, web.pageZoom + 0.1)
+        case ("-", false): web.pageZoom = max(0.5, web.pageZoom - 0.1)
+        case ("0", false): web.pageZoom = 1
+        default:
+            guard !shift, let n = Int(k), (1...9).contains(n) else { return false }
+            select(n == 9 ? tabs.count - 1 : min(n - 1, tabs.count - 1)) // ⌘9 is the last tab, as in Safari.
+        }
+        return true
+    }
+
+    // MARK: Tabs
+
+    /// A bare WKWebView is not Safari: sites see no "Safari" in its user agent and serve cut-down pages, video can't go
+    /// full screen and waits for a click. This one looks and behaves like Safari, so pages load in full.
+    /// (Pop-ups get WebKit's copy of their opener's configuration, so they keep all of this.)
+    static func fullConfig() -> WKWebViewConfiguration {
+        let c = WKWebViewConfiguration()
+        let v = Bundle(path: "/Applications/Safari.app")?.infoDictionary?["CFBundleShortVersionString"] as? String ?? "26.0"
+        c.applicationNameForUserAgent = "Version/\(v) Safari/605.1.15"
+        c.preferences.isElementFullscreenEnabled = true
+        c.preferences.javaScriptCanOpenWindowsAutomatically = true
+        c.mediaTypesRequiringUserActionForPlayback = []
+        c.allowsAirPlayForMediaPlayback = true
+        return c
+    }
+
+    @discardableResult private func newTab(config: WKWebViewConfiguration? = nil) -> WKWebView {
+        let w = WKWebView(frame: pageHost.bounds, configuration: config ?? Self.fullConfig())
+        w.autoresizingMask = [.width, .height]
+        w.navigationDelegate = self
+        w.uiDelegate = self
+        w.allowsBackForwardNavigationGestures = true
+        w.allowsMagnification = true
+        if #available(macOS 26.0, *) { w.obscuredContentInsets = NSEdgeInsets(top: topInset, left: 0, bottom: 0, right: 0) }
+        // The notch screen's page is read for the Duo bar's ink under other windows; keep it drawing there (see DuoMenu).
+        let keepDrawing = Selector(("_setWindowOcclusionDetectionEnabled:"))
+        if onNotchScreen, w.responds(to: keepDrawing) { w.setValue(false, forKey: "windowOcclusionDetectionEnabled") }
+        let tab = DeskTab(web: w)
+        tab.watches = [
+            w.observe(\.title) { [weak self] _, _ in self?.refreshTabs() },
+            w.observe(\.estimatedProgress) { [weak self] w, _ in if w === self?.web { self?.updateProgress() } },
+            w.observe(\.isLoading) { [weak self] w, _ in if w === self?.web { self?.updateProgress() } },
+        ]
+        tabs.append(tab)
+        select(tabs.count - 1)
+        return w
+    }
+
+    private func select(_ i: Int) {
+        guard tabs.indices.contains(i) else { return }
+        current = i
+        pageHost.subviews.forEach { $0.removeFromSuperview() }
+        web.frame = pageHost.bounds
+        pageHost.addSubview(web)
+        homeView.isHidden = web.url != nil
+        if onNotchScreen { DuoMenu.shared.pageWeb = web }
+        if field.currentEditor() == nil || !finding { field.stringValue = web.url?.absoluteString ?? "" }
+        if addressBar.isHidden { window.makeFirstResponder(web) }
+        updateProgress()
+        refreshTabs()
+    }
+
+    private func closeTab(_ i: Int) {
+        guard tabs.indices.contains(i) else { return }
+        let t = tabs.remove(at: i)
+        t.watches = []
+        t.web.stopLoading()
+        t.web.removeFromSuperview()
+        if tabs.isEmpty { newTab(); return } // The last tab closed leaves a blank one, not an empty desk.
+        select(i < current ? current - 1 : min(current, tabs.count - 1))
+    }
+
+    @objc private func pickTab(_ b: NSButton) { select(b.tag) }
+    @objc private func closeTabButton(_ b: NSButton) { closeTab(b.tag) }
+    @objc private func plusTab() { newTab(); revealAddress() }
+
+    private func refreshTabs() {
+        tabStrip.subviews.forEach { $0.removeFromSuperview() }
+        let gap: CGFloat = 4, plus: CGFloat = 26, n = CGFloat(tabs.count)
+        let w = max(60, min(200, (tabStrip.bounds.width - plus - gap * n) / n))
+        for (i, t) in tabs.enumerated() {
+            let chip = NSView(frame: NSRect(x: CGFloat(i) * (w + gap), y: 0, width: w, height: 26))
+            chip.wantsLayer = true
+            chip.layer?.cornerRadius = 7
+            if i == current { chip.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.14).cgColor }
+            let title = t.web.title.flatMap { $0.isEmpty ? nil : $0 } ?? t.web.url?.host ?? "새 탭"
+            let icon = (t.icon ?? NSImage(systemSymbolName: "globe", accessibilityDescription: nil)!).copy() as! NSImage
+            icon.size = NSSize(width: 14, height: 14)
+            let b = FirstClickButton(title: title, image: icon, target: self, action: #selector(pickTab(_:)))
+            b.tag = i
+            b.isBordered = false
+            b.imagePosition = .imageLeading
+            b.alignment = .left
+            b.font = .systemFont(ofSize: 12)
+            b.cell?.lineBreakMode = .byTruncatingTail
+            b.frame = NSRect(x: 6, y: 0, width: w - 28, height: 26)
+            let x = FirstClickButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "탭 닫기")!, target: self, action: #selector(closeTabButton(_:)))
+            x.tag = i
+            x.isBordered = false
+            x.frame = NSRect(x: w - 22, y: 5, width: 16, height: 16)
+            chip.addSubview(b)
+            chip.addSubview(x)
+            tabStrip.addSubview(chip)
+        }
+        let p = FirstClickButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "새 탭")!, target: self, action: #selector(plusTab))
+        p.isBordered = false
+        p.frame = NSRect(x: min(n * (w + gap), tabStrip.bounds.width - plus), y: 0, width: plus, height: 26)
+        tabStrip.addSubview(p)
+    }
+
+    // MARK: The pull-down bar
+
+    /// Sizes the bar: the address row on top, then the tabs, or the suggestions while there are any.
+    private func layoutBar() {
+        guard let root = window.contentView else { return }
+        let w = addressBar.frame.width
+        let list: CGFloat = suggestions.isEmpty ? 30 : CGFloat(suggestions.count) * 28 + 4
+        let h = 44 + list + 6
+        addressBar.frame = NSRect(x: (root.bounds.width - w) / 2, y: root.bounds.height - topInset - 12 - h, width: w, height: h)
+        addressBar.subviews.first?.frame = addressBar.bounds // The tint.
+        barRow.frame = NSRect(x: 0, y: h - 44, width: w, height: 44)
+        tabStrip.frame = NSRect(x: 8, y: 6, width: w - 16, height: 26)
+        suggestionBox.frame = NSRect(x: 8, y: 6, width: w - 16, height: list - 4)
+        tabStrip.isHidden = !suggestions.isEmpty
+        suggestionBox.isHidden = suggestions.isEmpty
+        refreshTabs()
+    }
+
+    private func refreshSuggestions() {
+        suggestionBox.subviews.forEach { $0.removeFromSuperview() }
+        let w = suggestionBox.bounds.width
+        for (i, s) in suggestions.enumerated() {
+            let b = FirstClickButton(title: "", target: self, action: #selector(pickSuggestion(_:)))
+            b.tag = i
+            b.isBordered = false
+            b.alignment = .left
+            b.cell?.lineBreakMode = .byTruncatingTail
+            let t = NSMutableAttributedString(string: s.title.isEmpty ? s.url : s.title, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor])
+            if !s.title.isEmpty { t.append(NSAttributedString(string: "  " + s.url, attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor])) }
+            t.insert(NSAttributedString(string: "  "), at: 0) // Level with the address above.
+            b.attributedTitle = t
+            b.frame = NSRect(x: 0, y: suggestionBox.bounds.height - CGFloat(i + 1) * 28, width: w, height: 26)
+            b.wantsLayer = true
+            b.layer?.cornerRadius = 6
+            if i == picked { b.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.35).cgColor }
+            suggestionBox.addSubview(b)
+        }
+    }
+
+    private func setSuggestions(_ list: [DeskHistory.Entry]) {
+        suggestions = list
+        picked = -1
+        layoutBar()
+        refreshSuggestions()
+    }
+
+    @objc private func pickSuggestion(_ b: NSButton) {
+        field.stringValue = suggestions[b.tag].url
+        go(field)
+    }
+
+    /// Slides the address bar down into view and puts the cursor in it, the address selected.
+    func revealAddress() {
+        finding = false
+        field.placeholderString = "주소 또는 검색어"
+        field.stringValue = web.url?.absoluteString ?? ""
+        showBar()
+    }
+
+    private func showBar() {
+        NSApp.activate(ignoringOtherApps: true) // Andeville is an accessory app: typing needs it in front.
+        window.makeKeyAndOrderFront(nil)
+        setSuggestions([])
+        if addressBar.isHidden {
+            addressBar.alphaValue = 0
+            addressBar.isHidden = false
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.2; addressBar.animator().alphaValue = 1 }
+        }
+        window.makeFirstResponder(field)
+        field.selectText(nil)
+    }
+
+    private func hideAddress() {
+        finding = false
+        setSuggestions([])
+        guard !addressBar.isHidden else { return }
+        NSAnimationContext.runAnimationGroup({ $0.duration = 0.2; addressBar.animator().alphaValue = 0 },
+                                             completionHandler: { [weak self] in self?.addressBar.isHidden = true })
+        window.makeFirstResponder(web)
+    }
+
+    @objc private func go(_ sender: NSTextField) {
+        if finding { return find(backwards: NSEvent.modifierFlags.contains(.shift)) }
+        guard let u = DeskBrowser.normalize(sender.stringValue) else { return }
+        web.load(URLRequest(url: u))
+        hideAddress()
+    }
+
+    func controlTextDidChange(_ n: Notification) {
+        guard !finding else { return }
+        setSuggestions(DeskHistory.rank(DeskHistory.all(), field.stringValue))
+    }
+
+    /// ↑/↓ walk the suggestions (the field takes the one picked), Escape folds the bar away.
+    func control(_ c: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
+        switch sel {
+        case #selector(NSResponder.cancelOperation(_:)): hideAddress()
+        case #selector(NSResponder.moveDown(_:)), #selector(NSResponder.moveUp(_:)):
+            guard !suggestions.isEmpty else { return false }
+            let down = sel == #selector(NSResponder.moveDown(_:))
+            picked = max(0, min(suggestions.count - 1, picked + (down ? 1 : -1)))
+            textView.string = suggestions[picked].url
+            refreshSuggestions()
+        default: return false
+        }
+        return true
+    }
+
+    // MARK: Find in page
+
+    private var lastFind = ""
+
+    private func startFind() {
+        finding = true
+        field.placeholderString = "페이지에서 찾기"
+        field.stringValue = lastFind
+        showBar()
+        finding = true // showBar clears suggestions, not the mode.
+    }
+
+    /// The next (⇧: previous) match, wrapping; the page scrolls to it and selects it. A beep when there is none.
+    private func find(backwards: Bool) {
+        if finding { lastFind = field.stringValue }
+        guard !lastFind.isEmpty else { return startFind() }
+        let c = WKFindConfiguration()
+        c.backwards = backwards
+        c.wraps = true
+        web.find(lastFind, configuration: c) { r in if !r.matchFound { NSSound.beep() } }
+    }
+
+    // MARK: Buttons
+
+    private func button(_ symbol: String, _ action: Selector) -> NSButton {
+        let b = FirstClickButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!, target: self, action: action)
+        b.bezelStyle = .texturedRounded
+        return b
+    }
+
+    @objc private func back() { web.goBack() }
+    @objc private func forward() { web.goForward() }
+    @objc private func reload() { web.reload() }
+    @objc private func home() {
+        if let u = DeskBrowser.home { web.load(URLRequest(url: u)) } else { homeView.isHidden = false; field.stringValue = "" }
+    }
+
+    /// The wallpaper cut to fill `size` (points).
+    static func homeBackground(_ url: URL, size points: CGSize, scale: CGFloat) -> NSImage? {
+        let size = CGSize(width: points.width * scale, height: points.height * scale) // Worked in pixels.
+        guard var img = CIImage(contentsOf: url), size.width > 0, size.height > 0 else { return nil }
+        let k = max(size.width / img.extent.width, size.height / img.extent.height) // Aspect fill, then centre crop.
+        img = img.transformed(by: CGAffineTransform(scaleX: k, y: k))
+        let crop = CGRect(x: img.extent.midX - size.width / 2, y: img.extent.midY - size.height / 2, width: size.width, height: size.height)
+        img = img.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+        guard let cg = CIContext().createCGImage(img, from: CGRect(origin: .zero, size: size)) else { return nil }
+        return NSImage(cgImage: cg, size: points)
+    }
+
+    // MARK: Loading
+
+    /// The accent line under the band, as wide as the load is far along; gone once it is done.
+    private func updateProgress() {
+        let w = window.contentView?.bounds.width ?? 0
+        progress.isHidden = !web.isLoading
+        progress.frame.size.width = w * web.estimatedProgress
+    }
+
+    private func showToast(_ text: String) {
+        guard let root = window.contentView else { return }
+        toast.stringValue = text
+        let w = min(root.bounds.width - 40, toast.intrinsicContentSize.width + 32)
+        toast.frame = NSRect(x: (root.bounds.width - w) / 2, y: 40, width: w, height: 30)
+        toast.isHidden = false
+        toastTimer?.invalidate()
+        toastTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in self?.toast.isHidden = true }
+    }
+
+    func webView(_ w: WKWebView, didCommit n: WKNavigation!) {
+        guard w === web else { return }
+        if field.currentEditor() == nil { field.stringValue = w.url?.absoluteString ?? "" }
+        homeView.isHidden = true
+    }
+
+    func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
+        guard let url = w.url, ["http", "https"].contains(url.scheme) else { return }
+        DeskHistory.add(url: url.absoluteString, title: w.title ?? "")
+        // The page's own icon, or the site's /favicon.ico.
+        w.evaluateJavaScript("(document.querySelector('link[rel~=\"icon\"]') || {}).href || ''") { [weak self] r, _ in
+            let s = r as? String ?? ""
+            guard let icon = URL(string: s.isEmpty ? "\(url.scheme!)://\(url.host ?? "")/favicon.ico" : s) else { return }
+            URLSession.shared.dataTask(with: icon) { d, _, _ in
+                guard let img = d.flatMap(NSImage.init(data:)) else { return }
+                DispatchQueue.main.async {
+                    guard let self, let t = self.tabs.first(where: { $0.web === w }) else { return }
+                    t.icon = img
+                    self.refreshTabs()
+                }
+            }.resume()
+        }
+    }
+
+    func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) { showError(w, e) }
+    func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: Error) { showError(w, e) }
+
+    /// A page saying what went wrong, with a button to try again. Not for loads that were cancelled or became downloads.
+    private func showError(_ w: WKWebView, _ e: Error) {
+        let ns = e as NSError
+        if ns.code == NSURLErrorCancelled || (ns.domain == "WebKitErrorDomain" && ns.code == 102) { return } // 102: turned into a download.
+        let url = ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String ?? w.url?.absoluteString ?? ""
+        func esc(_ s: String) -> String {
+            s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
+        }
+        let html = """
+        <!doctype html><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>페이지를 열 수 없음</title>
+        <style>body{font:15px -apple-system,sans-serif;display:grid;place-items:center;height:90vh;margin:0;text-align:center}
+        h1{font-size:22px;margin:0 0 8px}p{color:GrayText;max-width:520px;margin:0 auto 18px;word-break:break-all}
+        button{font:inherit;padding:7px 18px;border-radius:8px;border:0;background:AccentColor;color:white}</style>
+        <div><h1>페이지를 열 수 없습니다</h1><p>\(esc(ns.localizedDescription))<br>\(esc(url))</p>
+        <button data-u="\(esc(url))" onclick="location.href=this.dataset.u">다시 시도</button></div>
+        """
+        w.loadHTMLString(html, baseURL: URL(string: url))
+    }
+
+    /// target=_blank links and window.open open in a new tab.
+    func webView(_ w: WKWebView, createWebViewWith c: WKWebViewConfiguration, for a: WKNavigationAction, windowFeatures f: WKWindowFeatures) -> WKWebView? {
+        newTab(config: c)
+    }
+
+    /// window.close() from a page closes its tab.
+    func webViewDidClose(_ w: WKWebView) {
+        if let i = tabs.firstIndex(where: { $0.web === w }) { closeTab(i) }
+    }
+
+    // MARK: Page dialogs (without these WKWebView drops alert/confirm/prompt and <input type=file> does nothing)
+
+    private func panel(_ text: String, buttons: [String], field: String? = nil) -> (Bool, String?) {
+        let a = NSAlert()
+        a.messageText = text
+        buttons.forEach { a.addButton(withTitle: $0) }
+        let input = field.map { v -> NSTextField in let f = NSTextField(string: v); f.frame.size.width = 260; return f }
+        a.accessoryView = input
+        let ok = a.runModal() == .alertFirstButtonReturn
+        return (ok, input?.stringValue)
+    }
+
+    func webView(_ w: WKWebView, runJavaScriptAlertPanelWithMessage m: String, initiatedByFrame f: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        _ = panel(m, buttons: ["확인"]); completionHandler()
+    }
+
+    func webView(_ w: WKWebView, runJavaScriptConfirmPanelWithMessage m: String, initiatedByFrame f: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        completionHandler(panel(m, buttons: ["확인", "취소"]).0)
+    }
+
+    func webView(_ w: WKWebView, runJavaScriptTextInputPanelWithPrompt p: String, defaultText d: String?, initiatedByFrame f: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        let (ok, s) = panel(p, buttons: ["확인", "취소"], field: d ?? "")
+        completionHandler(ok ? s : nil)
+    }
+
+    func webView(_ w: WKWebView, runOpenPanelWith p: WKOpenPanelParameters, initiatedByFrame f: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let o = NSOpenPanel()
+        o.allowsMultipleSelection = p.allowsMultipleSelection
+        o.canChooseDirectories = p.allowsDirectories
+        o.begin { completionHandler($0 == .OK ? o.urls : nil) }
+    }
+
+    /// Camera and microphone: macOS asks once for Andeville itself; each site is then asked like in Safari.
+    func webView(_ w: WKWebView, requestMediaCapturePermissionFor o: WKSecurityOrigin, initiatedByFrame f: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        decisionHandler(panel("\(o.host)에서 카메라/마이크를 사용하려고 합니다.", buttons: ["허용", "허용 안 함"]).0 ? .grant : .deny)
+    }
+
+    // MARK: Downloads
+
+    func webView(_ w: WKWebView, decidePolicyFor a: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        decisionHandler(a.shouldPerformDownload ? .download : .allow)
+    }
+
+    /// Anything the page can't show, or the server marks as an attachment, is saved instead.
+    func webView(_ w: WKWebView, decidePolicyFor r: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        let attachment = (r.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")?.lowercased().hasPrefix("attachment") == true
+        decisionHandler(r.canShowMIMEType && !attachment ? .allow : .download)
+    }
+
+    func webView(_ w: WKWebView, navigationAction a: WKNavigationAction, didBecome d: WKDownload) { d.delegate = self }
+    func webView(_ w: WKWebView, navigationResponse r: WKNavigationResponse, didBecome d: WKDownload) { d.delegate = self }
+
+    /// Into ~/Downloads under the server's name, numbered when that name is taken.
+    func download(_ d: WKDownload, decideDestinationUsing r: URLResponse, suggestedFilename name: String, completionHandler: @escaping (URL?) -> Void) {
+        let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let base = (name as NSString).deletingPathExtension, ext = (name as NSString).pathExtension
+        var u = dir.appendingPathComponent(name), n = 1
+        while FileManager.default.fileExists(atPath: u.path) {
+            u = dir.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)")
+            n += 1
+        }
+        downloads[d] = u
+        showToast("다운로드 중: \(u.lastPathComponent)")
+        completionHandler(u)
+    }
+
+    func downloadDidFinish(_ d: WKDownload) {
+        guard let u = downloads.removeValue(forKey: d) else { return }
+        // Bounces the Downloads stack in the Dock, as Safari's do.
+        DistributedNotificationCenter.default().post(name: .init("com.apple.DownloadFileFinished"), object: u.path)
+        showToast("다운로드 완료: \(u.lastPathComponent)")
+    }
+
+    func download(_ d: WKDownload, didFailWithError e: Error, resumeData: Data?) {
+        let name = downloads.removeValue(forKey: d)?.lastPathComponent ?? ""
+        showToast("다운로드 실패: \(name)")
+    }
+}
+
+// MARK: - Duo style (실험실 › 데스크 브라우저 + 아이폰 듀오 스타일)
+
+/// Which ink the Duo layout's bare text and symbols take, part by part: the kit's Primary for a light background
+/// (#1a1a1a) over a light page, its Primary for a dark one (#f5f5f5) over a dark page, and the system theme's when
+/// the page there is in between. So nothing goes the same colour as what is behind it.
+/// ponytail: one for every screen, read from the notch screen's page; per screen if pages on other screens differ.
+final class DuoTone: ObservableObject {
+    static let shared = DuoTone()
+    /// True: dark ink (the page is light there).
+    @Published var bar = false
+    @Published var status = false
+    @Published var controls = false
+    static func ink(_ dark: Bool) -> Color { Color(nsColor: nsInk(dark)) }
+    static func nsInk(_ dark: Bool) -> NSColor { dark ? NSColor(white: 0x1a / 255, alpha: 1) : NSColor(white: 0xf5 / 255, alpha: 1) }
+
+    /// Light page, dark ink; dark page, light ink; in between, the system theme (dark theme, light ink).
+    static func darkInk(luminance l: CGFloat) -> Bool {
+        if l > 0.62 { return true }
+        if l < 0.38 { return false }
+        return NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+    }
+
+    private static let ci = CIContext()
+
+    /// The page's average brightness in `rect` (web view points, from its top left), 0...1.
+    static func luminance(of web: WKWebView, in rect: CGRect, done: @escaping (CGFloat) -> Void) {
+        let c = WKSnapshotConfiguration()
+        c.rect = rect
+        c.snapshotWidth = NSNumber(value: Double(max(rect.width / 4, 1))) // Small: only its average is wanted.
+        c.afterScreenUpdates = false
+        web.takeSnapshot(with: c) { img, _ in
+            guard let cg = img?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+            let src = CIImage(cgImage: cg)
+            let avg = src.applyingFilter("CIAreaAverage", parameters: [kCIInputExtentKey: CIVector(cgRect: src.extent)])
+            var px = [UInt8](repeating: 0, count: 4)
+            ci.render(avg, toBitmap: &px, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+            done((0.2126 * CGFloat(px[0]) + 0.7152 * CGFloat(px[1]) + 0.0722 * CGFloat(px[2])) / 255)
+        }
+    }
+
+    /// Reads the page behind the bar, the status bar and the buttons. `bar` is the bar's height.
+    func sample(_ web: WKWebView, bar h: CGFloat) {
+        let w = web.bounds.width, tall = web.bounds.height, rail = DuoRail.width
+        let parts: [(CGRect, ReferenceWritableKeyPath<DuoTone, Bool>)] = [
+            (CGRect(x: 0, y: 0, width: w, height: h), \.bar),
+            (CGRect(x: w - rail, y: h, width: rail, height: 110), \.status),
+            (CGRect(x: w - rail, y: tall - 260, width: rail, height: 260), \.controls),
+        ]
+        for (rect, key) in parts {
+            Self.luminance(of: web, in: rect) { [weak self] l in
+                guard let self else { return }
+                let dark = Self.darkInk(luminance: l)
+                if self[keyPath: key] != dark { withAnimation(.easeInOut(duration: 0.3)) { self[keyPath: key] = dark } }
+            }
+        }
+    }
+}
+
+/// The menu bar folded into the notch. Fingers moving left on the notch slide the front app's text menus out of its
+/// left side, moving right slide the menu bar's app and system icons out of its right. Each is the real menu, opened
+/// through Accessibility (which face unlock already has). The other way, or the cursor leaving the bar, folds it back.
+final class DuoMenu: ObservableObject {
+    static let shared = DuoMenu()
+    struct Item: Identifiable {
+        let id: Int, title: String, symbol: String?, icon: NSImage?, element: AXUIElement, pid: pid_t
+    }
+    /// -1 text menus out, 1 icons out, 0 folded into the notch.
+    @Published private(set) var side = 0
+    /// The item whose menu is open ("m3" text menu, "x3" icon), lit like a menu bar title.
+    @Published private(set) var openKey: String?
+    /// Where each item sits in the bar (its view's frame, from the bar's top left), for opening its menu under it.
+    var frames: [String: CGRect] = [:]
+    @Published private(set) var menus: [Item] = []
+    @Published private(set) var extras: [Item] = []
+    private(set) var on = false
+    private var panel: NSPanel?, watch: Timer?, away: Date?
+    /// The notch screen's Duo page and its address field, which sits on the cover.
+    weak var pageWeb: WKWebView?
+    private var toner: Timer?, tone: AnyCancellable?
+    private weak var blurView: NSVisualEffectView?
+
+    func set(on: Bool) {
+        self.on = on
+        show(0)
+        panel?.orderOut(nil)
+        panel = nil
+        toner?.invalidate()
+        toner = nil
+        tone = nil
+        MenuBarMirror.shared.place() // Back under the menu bar until a cover is up again.
+        guard on, let screen = notchScreen() else { return }
+        let f = screen.frame, notch = notchRect(in: f, notch: notchSize(of: screen))
+        let bar = notch.height // Down to the notch's bottom edge, no lower.
+        let frame = NSRect(x: f.minX, y: f.maxY - bar, width: f.width, height: bar)
+        // The cover: macOS's own menu bar stays empty under it. It takes every click on the bar (the menus are reached
+        // through the notch instead).
+        let p = DuoCover(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.animationBehavior = .none
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = false
+        p.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1) // Over the menu bar, under the notch.
+        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        let host = FirstMouseHost(rootView: DuoMenuView(menu: self, left: notch.minX - f.minX, right: notch.maxX - f.minX, width: f.width))
+        host.sizingOptions = []
+        let root = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        // A live blur of what lies under the bar (the page, and macOS's own menu bar, which it smears past reading):
+        // the page's colours come through, its shapes do not. Its last few points fade into the page below.
+        let blur = NSVisualEffectView(frame: root.bounds)
+        blur.material = .hudWindow
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        blur.maskImage = NSImage(size: root.bounds.size, flipped: false) { r in
+            NSGradient(colors: [.clear, .black, .black], atLocations: [0, 0.22, 1], colorSpace: .deviceRGB)?.draw(in: r, angle: 90)
+            return true
+        }
+        blur.isHidden = UserDefaults.standard.object(forKey: "menuBarMirror") as? Bool ?? true // The mirror shows instead.
+        root.addSubview(blur)
+        blurView = blur
+        host.frame = root.bounds
+        root.addSubview(host)
+        p.contentView = root
+        p.orderFrontRegardless()
+        panel = p
+        MenuBarMirror.shared.place()
+        // Under other windows WebKit stops drawing the page and the blur would show it stale; keep it drawing (WebKit's
+        // own switch, not public API, hence the check).
+        let keepDrawing = Selector(("_setWindowOcclusionDetectionEnabled:"))
+        if let web = pageWeb, web.responds(to: keepDrawing) { web.setValue(false, forKey: "windowOcclusionDetectionEnabled") } // KVC finds the _set… setter.
+        toner = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
+            if let web = self?.pageWeb { DuoTone.shared.sample(web, bar: bar) }
+        }
+        // A light blur under dark ink, a dark one under light.
+        tone = DuoTone.shared.$bar.sink { [weak self] dark in self?.blurView?.appearance = NSAppearance(named: dark ? .aqua : .darkAqua) }
+    }
+
+    /// The menu bar mirror (`MenuBarMirror`) shows through the cover in place of its blur.
+    func mirrored(_ on: Bool) { blurView?.isHidden = on }
+    var cover: NSPanel? { panel }
+
+    /// Lets clicks (and Accessibility's look at a point) through the cover, or takes them again. Any thread.
+    static func seeThrough(_ on: Bool) {
+        let set = { shared.panel?.ignoresMouseEvents = on }
+        if Thread.isMainThread { set() } else { DispatchQueue.main.sync(execute: set) }
+    }
+
+    func swipe(fingersLeft: Bool) {
+        show(fingersLeft ? (side == 1 ? 0 : -1) : (side == -1 ? 0 : 1))
+    }
+
+    func show(_ s: Int) {
+        if s == -1 { menus = Self.menuItems() }
+        if s == 1 {
+            DispatchQueue.global(qos: .userInitiated).async {
+                let items = Self.extraItems() // A hundred apps asked over Accessibility: off the main thread.
+                DispatchQueue.main.async { self.extras = items }
+            }
+        }
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { side = s }
+        watch?.invalidate()
+        watch = nil
+        away = nil
+        guard s != 0 else { return }
+        // Folds back 2 s after the cursor leaves the bar (and the notch).
+        watch = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            guard let self, let p = self.panel else { return }
+            if cursor(NSEvent.mouseLocation, isOver: p.frame) { self.away = nil; return }
+            if let a = self.away { if Date().timeIntervalSince(a) > 2 { self.show(0) } } else { self.away = Date() }
+        }
+    }
+
+    /// Opens the item's menu right under it, the bar staying out, as a copy of the app's real menu (`DuoMirror`);
+    /// choosing in it presses the real item, then the bar folds. A menu that cannot be read (built only when it
+    /// opens, as some menu bar icons are) is pressed for real instead and opens where macOS puts it.
+    func press(_ item: Item, key: String) {
+        let mirror = DuoMirror(pid: item.pid)
+        if let m = mirror.menu(under: item.element), let p = panel {
+            let f = frames[key] ?? .zero
+            openKey = key
+            // Just under macOS's own (taller) menu bar: a menu reaching into it opens scrolled, its top items hidden.
+            let top = min(p.frame.minY, (p.screen ?? NSScreen.main)?.visibleFrame.maxY ?? p.frame.minY) - 2
+            m.popUp(positioning: nil, at: NSPoint(x: p.frame.minX + f.minX - 6, y: top), in: nil) // Holds until it closes.
+            openKey = nil
+            if mirror.chosen { show(0) } else { away = nil } // Cancelled: the bar stays out.
+            return
+        }
+        show(0)
+        NSRunningApplication(processIdentifier: item.pid)?.activate()
+        // Pressing a menu can hold the call until the menu closes.
+        DispatchQueue.global(qos: .userInitiated).async { AXUIElementPerformAction(item.element, kAXPressAction as CFString) }
+    }
+
+    /// The front app's menu titles, led by the Apple menu (its logo). Andeville in front (the desktop browser was clicked) has
+    /// no menus of its own, so Finder's stand in, as on the desktop.
+    static func menuItems() -> [Item] {
+        guard var app = NSWorkspace.shared.frontmostApplication else { return [] }
+        if app.processIdentifier == getpid(), let f = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first { app = f }
+        let e = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(e, 0.3)
+        guard let bar = RealControlCenter.attr(e, kAXMenuBarAttribute),
+              let kids = RealControlCenter.attr(bar as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement] else { return [] }
+        return kids.enumerated().compactMap { i, k in
+            if i == 0 { return Item(id: i, title: "Apple", symbol: "apple.logo", icon: nil, element: k, pid: app.processIdentifier) }
+            guard let t = RealControlCenter.attr(k, kAXTitleAttribute) as? String, !t.isEmpty else { return nil }
+            return Item(id: i, title: t, symbol: nil, icon: nil, element: k, pid: app.processIdentifier)
+        }
+    }
+
+    /// Every app's menu bar icon, in the menu bar's own order. Apple's get a symbol, the clock its time, others their app's icon.
+    /// ponytail: app icons, not the status items' own pictures (those need Screen Recording); capture them if that is missed.
+    static func extraItems() -> [Item] {
+        var found: [(x: CGFloat, item: Item)] = []
+        for app in NSWorkspace.shared.runningApplications where app.processIdentifier != getpid() && app.bundleIdentifier != "com.apple.MenuBarAgent" {
+            let e = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetMessagingTimeout(e, app.bundleIdentifier == "com.apple.controlcenter" ? 1 : 0.1) // Control Center is slow to answer.
+            guard let bar = RealControlCenter.attr(e, "AXExtrasMenuBar"),
+                  let kids = RealControlCenter.attr(bar as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement] else { continue }
+            let apple = app.bundleIdentifier?.hasPrefix("com.apple.") == true
+            for k in kids {
+                let ident = RealControlCenter.attr(k, kAXIdentifierAttribute) as? String ?? ""
+                let desc = RealControlCenter.attr(k, kAXDescriptionAttribute) as? String
+                    ?? RealControlCenter.attr(k, kAXTitleAttribute) as? String ?? app.localizedName ?? ""
+                var at = CGPoint.zero
+                if let v = RealControlCenter.attr(k, kAXPositionAttribute) { AXValueGetValue(v as! AXValue, .cgPoint, &at) }
+                let key = (ident + " " + desc).lowercased()
+                if apple, key.trimmingCharacters(in: .whitespaces).isEmpty { continue } // Nameless placeholders (MenuBarAgent).
+                let clock = apple && key.contains("clock")
+                let symbol = apple && !clock ? symbol(for: key) : nil
+                let title = clock ? Date().formatted(date: .omitted, time: .shortened) : desc
+                found.append((at.x, Item(id: found.count, title: title, symbol: symbol, icon: clock || symbol != nil ? nil : app.icon,
+                                         element: k, pid: app.processIdentifier)))
+            }
+        }
+        return found.sorted { $0.x < $1.x }.map(\.item)
+    }
+
+    static func symbol(for key: String) -> String? {
+        let map = [("wifi", "wifi"), ("wi-fi", "wifi"), ("battery", "battery.75percent"), ("sound", "speaker.wave.2.fill"),
+                   ("volume", "speaker.wave.2.fill"), ("controlcenter", "switch.2"), ("focus", "moon.fill"), ("siri", "mic.fill"),
+                   ("spotlight", "magnifyingglass"), ("display", "sun.max.fill"), ("screenmirroring", "rectangle.on.rectangle"),
+                   ("airplay", "airplayvideo"), ("user", "person.crop.circle"), ("textinput", "keyboard"), ("keyboard", "keyboard"),
+                   ("nowplaying", "play.fill"), ("timemachine", "clock.arrow.circlepath"), ("bluetooth", "wave.3.right"),
+                   ("weather", "cloud.sun.fill"), ("input", "character.textbox"), ("korean", "character.textbox"),
+                   ("battery", "battery.75percent"), ("stage", "squares.leading.rectangle")]
+        return map.first { key.contains($0.0) }?.1 // Unknown: the app's own icon.
+    }
+}
+
+/// A bar item: notes where it sits (its menu opens under it) and is lit while its menu is open.
+struct DuoBarItem: ViewModifier {
+    @ObservedObject var menu: DuoMenu
+    let key: String, ink: Color
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(ink.opacity(menu.openKey == key ? 0.18 : 0)))
+            .padding(.horizontal, -6)
+            .background(GeometryReader { g in
+                Color.clear
+                    .onAppear { menu.frames[key] = g.frame(in: .global) }
+                    .onChange(of: g.frame(in: .global)) { _, f in menu.frames[key] = f }
+            })
+    }
+}
+
+/// A copy of an app's real menu, read over Accessibility, so it can open wherever Andeville wants it: titles,
+/// separators, greyed-out items, checkmarks, shortcuts and submenus (read when they open). Choosing an item presses
+/// the real one in its app.
+/// ponytail: no item pictures and no shortcuts on special keys (arrows, F-keys); read AXMenuItemCmdGlyph if missed.
+final class DuoMirror: NSObject, NSMenuDelegate {
+    private let pid: pid_t
+    private var sources: [ObjectIdentifier: AXUIElement] = [:]
+    private(set) var chosen = false
+
+    init(pid: pid_t) { self.pid = pid }
+
+    /// The menu under a menu bar item, or nil when there is none to read yet.
+    func menu(under element: AXUIElement) -> NSMenu? {
+        guard let ax = (RealControlCenter.attr(element, kAXChildrenAttribute) as? [AXUIElement])?.first,
+              let items = RealControlCenter.attr(ax, kAXChildrenAttribute) as? [AXUIElement], !items.isEmpty else { return nil }
+        let m = NSMenu()
+        m.autoenablesItems = false
+        fill(m, with: items)
+        return m
+    }
+
+    private func fill(_ m: NSMenu, with items: [AXUIElement]) {
+        for k in items {
+            let title = RealControlCenter.attr(k, kAXTitleAttribute) as? String ?? ""
+            let sub = (RealControlCenter.attr(k, kAXChildrenAttribute) as? [AXUIElement])?.first
+            if title.isEmpty, sub == nil { m.addItem(.separator()); continue }
+            let i = NSMenuItem(title: title, action: #selector(choose(_:)), keyEquivalent: "")
+            i.target = self
+            i.representedObject = k
+            i.isEnabled = RealControlCenter.attr(k, kAXEnabledAttribute) as? Bool ?? true
+            if let mark = RealControlCenter.attr(k, "AXMenuItemMarkChar") as? String, !mark.isEmpty { i.state = .on }
+            if let c = RealControlCenter.attr(k, "AXMenuItemCmdChar") as? String, c.count == 1 {
+                let f = RealControlCenter.attr(k, "AXMenuItemCmdModifiers") as? Int ?? 0 // 1 shift, 2 option, 4 control, 8 no command.
+                var mask: NSEvent.ModifierFlags = f & 8 == 0 ? [.command] : []
+                if f & 1 != 0 { mask.insert(.shift) }
+                if f & 2 != 0 { mask.insert(.option) }
+                if f & 4 != 0 { mask.insert(.control) }
+                i.keyEquivalent = c.lowercased()
+                i.keyEquivalentModifierMask = mask
+            }
+            if let sub {
+                let s = NSMenu(title: title)
+                s.autoenablesItems = false
+                s.delegate = self
+                sources[ObjectIdentifier(s)] = sub
+                i.submenu = s
+                i.action = nil
+            }
+            m.addItem(i)
+        }
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu.items.isEmpty, let ax = sources[ObjectIdentifier(menu)],
+              let items = RealControlCenter.attr(ax, kAXChildrenAttribute) as? [AXUIElement] else { return }
+        fill(menu, with: items)
+    }
+
+    @objc private func choose(_ i: NSMenuItem) {
+        guard let k = i.representedObject else { return }
+        chosen = true
+        let element = k as! AXUIElement
+        NSRunningApplication(processIdentifier: pid)?.activate() // Its command goes to its front window.
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.05) {
+            AXUIElementPerformAction(element, kAXPressAction as CFString)
+        }
+    }
+}
+
+/// The Duo cover over the menu bar: borderless, so it must be told it may take typing (the address field).
+final class DuoCover: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+/// The two halves of the folded menu bar, each clipped at the notch's edge so it slides out from under it. A blur
+/// fading in from the far end rides behind each, softly covering what it passes (the page's address on the left).
+struct DuoMenuView: View {
+    @ObservedObject var menu: DuoMenu
+    @ObservedObject private var tone = DuoTone.shared
+    let left: CGFloat, right: CGFloat, width: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            half(width: left, out: menu.side == -1, edge: .trailing) {
+                HStack(spacing: 20) {
+                    ForEach(menu.menus) { item in
+                        Button { menu.press(item, key: "m\(item.id)") } label: {
+                            if let s = item.symbol { Image(systemName: s).font(.system(size: 15, weight: .medium)) }
+                            else { Text(item.title).font(.system(size: 13, weight: item.id == 1 ? .bold : .medium)) } // The app's name, bold.
+                        }
+                        .modifier(DuoBarItem(menu: menu, key: "m\(item.id)", ink: DuoTone.ink(tone.bar)))
+                        .help(item.title)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            half(width: width - right, out: menu.side == 1, edge: .leading) {
+                HStack(spacing: 16) {
+                    ForEach(menu.extras) { item in
+                        Button { menu.press(item, key: "x\(item.id)") } label: {
+                            if let s = item.symbol { Image(systemName: s).font(.system(size: 13, weight: .semibold)) }
+                            else if let i = item.icon { Image(nsImage: i).resizable().frame(width: 17, height: 17) }
+                            else { Text(item.title).font(.system(size: 13, weight: .medium)).monospacedDigit() }
+                        }
+                        .modifier(DuoBarItem(menu: menu, key: "x\(item.id)", ink: DuoTone.ink(tone.bar)))
+                        .help(item.title)
+                    }
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(DuoTone.ink(tone.bar))
+        .shadow(color: .black.opacity(tone.bar ? 0 : 0.35), radius: 2, y: 1)
+    }
+
+    private func half<C: View>(width w: CGFloat, out: Bool, edge: Alignment, @ViewBuilder content: () -> C) -> some View {
+        let lead = edge == .trailing
+        let clear = NotchLive.wing + Store.notchEar
+        return content()
+            // The blur's fade runs on past the far end; the near end keeps clear of the notch's player wings and fillets.
+            .padding(.leading, lead ? 96 : 18 + clear).padding(.trailing, lead ? 18 + clear : 96)
+            .frame(maxHeight: .infinity)
+            .background(DuoBlur().mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.3)],
+                                                     startPoint: lead ? .leading : .trailing, endPoint: lead ? .trailing : .leading)))
+            .fixedSize(horizontal: true, vertical: false)
+            .offset(x: out ? 0 : lead ? w : -w)
+            .opacity(out ? 1 : 0)
+            .frame(width: max(w, 0), alignment: edge)
+            .clipped()
+    }
+}
+
+struct DuoBlur: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .hudWindow
+        v.blendingMode = .behindWindow
+        v.state = .active
+        return v
+    }
+    func updateNSView(_ v: NSVisualEffectView, context: Context) {}
+}
+
+/// The Duo style's right edge, after the iPhone Duo iOS 27 UI Kit's Pane controls (Trailing): the status bar (time
+/// over Wi-Fi) at the top and the browser's buttons at the bottom, pushed apart. The middle is left to the real
+/// macOS Dock (on the right of the screen); the column lines up on the Dock's middle.
+struct DuoRail: View {
+    /// The kit's pane: 84 wide, 24 in from its leading edge and 12 from its trailing one, 24 top and bottom.
+    static let width: CGFloat = 84
+    /// The view holding the rail is wider, so the status bar's blur can fade out past the pane's edge.
+    static let hostWidth: CGFloat = 160
+    let back: () -> Void, forward: () -> Void, reload: () -> Void, home: () -> Void
+    /// From the screen's right edge to the column's middle: the Dock's middle when it is on the right, else the kit's 36.
+    var center: CGFloat = 36
+    @ObservedObject private var tone = DuoTone.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 6) { // Status bar
+                TimelineView(.everyMinute) { t in
+                    Text(t.date, format: .dateTime.hour(.defaultDigits(amPM: .omitted)).minute()).font(.system(size: 15, weight: .semibold))
+                }
+                DuoRing()
+            }
+            .foregroundStyle(DuoTone.ink(tone.status))
+            .frame(width: 44)
+            .background(DuoHalo(light: tone.status).frame(width: 120, height: 130) // Wider than the rail: the blur fades out all round.
+                .mask(RadialGradient(stops: [.init(color: .black, location: 0), .init(color: .black.opacity(0.6), location: 0.45),
+                                            .init(color: .clear, location: 1)], center: .center, startRadius: 0, endRadius: 60)))
+            Spacer(minLength: 0)
+            DuoGlassStack {
+                DuoGroup(buttons: [("chevron.left", "뒤로", back), ("chevron.right", "앞으로", forward)], dark: tone.controls)
+                DuoGroup(buttons: [("arrow.clockwise", "새로고침", reload), ("house", "홈", home)], dark: tone.controls)
+            }
+        }
+        .padding(.vertical, 24)
+        .frame(width: 48)
+        .padding(.trailing, max(center - 24, 0))
+        .frame(width: Self.width, alignment: .trailing)
+        .frame(maxHeight: .infinity)
+        .frame(width: Self.hostWidth, alignment: .trailing)
+    }
+}
+
+/// The kit's Buttons, Type=Group - Vertical, in the system's own Liquid Glass (the kit draws a picture of it): a
+/// 48-wide capsule, 4 in, its 36-point symbols 20 apart, SF 17 medium in the kit's Primary.
+struct DuoGroup: View {
+    let buttons: [(symbol: String, name: String, action: () -> Void)]
+    /// Dark ink and light glass (the kit's light mode), else light ink and dark glass.
+    var dark = true
+
+    var body: some View {
+        VStack(spacing: 20) {
+            ForEach(buttons.indices, id: \.self) { i in
+                let b = buttons[i]
+                Button(action: b.action) {
+                    Image(systemName: b.symbol).font(.system(size: 17, weight: .medium))
+                        .frame(width: 36, height: 36).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(b.name)
+                .accessibilityLabel(b.name)
+            }
+        }
+        .foregroundStyle(DuoTone.ink(dark))
+        .padding(4)
+        .frame(width: 48)
+        .modifier(DuoGlass())
+        .environment(\.colorScheme, dark ? .light : .dark)
+    }
+}
+
+/// Liquid Glass that answers the pointer, in a capsule; a plain blur before macOS 26.
+struct DuoGlass: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) { content.glassEffect(.regular.interactive(), in: Capsule()) }
+        else { content.background(.ultraThinMaterial, in: Capsule()) }
+    }
+}
+
+/// The button groups 10 apart, sharing one pane of glass on macOS 26+ so they render and move as one material.
+struct DuoGlassStack<Content: View>: View {
+    @ViewBuilder let content: Content
+    var body: some View {
+        if #available(macOS 26.0, *) { GlassEffectContainer(spacing: 10) { VStack(spacing: 10) { content } } }
+        else { VStack(spacing: 10) { content } }
+    }
+}
+
+/// The rail's host: wider than the rail for the status bar's blur, whose margin left of the rail lets clicks through
+/// to the page. (SwiftUI's buttons are not views of their own, so it goes by where the click lands.)
+final class DuoRailHost<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func hitTest(_ p: NSPoint) -> NSView? {
+        guard let up = superview, convert(p, from: up).x >= bounds.width - DuoRail.width else { return nil }
+        return super.hitTest(p)
+    }
+}
+
+/// A blur of the page behind the status bar, strongest at its middle and fading out evenly in every direction.
+struct DuoHalo: NSViewRepresentable {
+    /// A light blur under dark ink, a dark one under light.
+    var light: Bool
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .hudWindow
+        v.blendingMode = .withinWindow // The page is in the same window, under the rail.
+        v.state = .active
+        return v
+    }
+    func updateNSView(_ v: NSVisualEffectView, context: Context) { v.appearance = NSAppearance(named: light ? .aqua : .darkAqua) }
+}
+
+/// The kit's status bar Wi-Fi module, its own 42-point SVG: the Wi-Fi glyph, the open ring (in the kit a 6-wide
+/// stroke clipped to the ring's outline, which is that outline filled) and four dots. Drawn as a template, so it
+/// takes the current ink.
+struct DuoRing: View {
+    static let image: NSImage? = {
+        let svg = """
+        <svg width="42" height="42" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12.3873 19.0272C12.84 19.4819 13.5457 19.4039 14.1183 18.9103C16.0091 17.2476 18.3659 16.3902 21.0023 16.3902C23.6388 16.3902 26.0089 17.2735 27.8864 18.9103C28.4457 19.4169 29.1514 19.4689 29.6174 19.0272C30.0835 18.5596 30.15 17.8581 29.6707 17.3645C27.6734 15.377 24.4111 14 21.0023 14C17.5936 14 14.318 15.39 12.334 17.3775C11.8546 17.8581 11.9079 18.5596 12.3873 19.0402V19.0272ZM15.6762 22.2878C16.1955 22.7814 16.8612 22.7295 17.4471 22.2618C18.4058 21.5214 19.6841 21.0147 21.0023 21.0277C22.3073 21.0277 23.5855 21.5214 24.5576 22.2748C25.1434 22.7424 25.8358 22.7684 26.3418 22.2748C26.8345 21.7812 26.9144 21.0277 26.3951 20.5601C25.1035 19.4299 23.1594 18.6375 21.0157 18.6375C18.8719 18.6375 16.9145 19.4299 15.6362 20.5601C15.1835 20.9758 15.0903 21.6902 15.6895 22.2878H15.6762ZM20.1235 26.6005C20.6961 27.1332 21.2953 27.1332 21.8678 26.6005L22.9464 25.5873C23.519 25.0417 23.6388 24.3532 22.9863 23.8856C22.4404 23.5089 21.748 23.2621 21.0023 23.2621C20.2567 23.2621 19.551 23.5089 19.0183 23.8986C18.3659 24.3532 18.499 25.0547 19.0716 25.5873L20.1368 26.6005H20.1235Z" fill-rule="evenodd" clip-rule="evenodd" fill="black"/>
+        <path d="M5.06145 31.8089C4.26518 32.3489 3.17495 32.1442 2.70278 31.3059C1.10949 28.4772 0.189749 25.31 0.0263552 22.0518C-0.166198 18.212 0.699023 14.3931 2.5277 11.0113C4.35638 7.62948 7.07834 4.81457 10.3969 2.87341C13.7154 0.932239 17.5031 -0.0606849 21.3472 0.00286956C25.1912 0.066424 28.944 1.18402 32.1966 3.23383C35.4491 5.28363 38.0765 8.18699 39.7924 11.6274C41.5083 15.0678 42.2468 18.9133 41.9274 22.7445C41.6564 25.9956 40.6325 29.1306 38.9465 31.9052C38.4469 32.7274 37.3505 32.8959 36.5725 32.3298V32.3298C35.7945 31.7638 35.6311 30.678 36.1171 29.8477C37.4353 27.5954 38.2374 25.0703 38.4554 22.4551C38.7218 19.2595 38.1058 16.052 36.6746 13.1824C35.2434 10.3128 33.0519 7.89112 30.339 6.1814C27.626 4.47167 24.4958 3.5395 21.2896 3.48649C18.0833 3.43348 14.924 4.26166 12.156 5.88077C9.38807 7.49988 7.11771 9.84778 5.59243 12.6685C4.06714 15.4892 3.34547 18.6746 3.50608 21.8773C3.63751 24.4982 4.3557 27.0485 5.5987 29.3431C6.05697 30.189 5.85773 31.2689 5.06145 31.8089V31.8089Z" fill="black"/>
+        <rect x="8" y="34" width="4.5" height="4.5" rx="2.25" fill="black"/>
+        <rect x="15" y="37" width="4.5" height="4.5" rx="2.25" fill="black"/>
+        <rect x="22" y="37" width="4.5" height="4.5" rx="2.25" fill="black"/>
+        <rect x="29" y="34" width="4.5" height="4.5" rx="2.25" fill="black"/>
+        </svg>
+        """
+        let i = NSImage(data: Data(svg.utf8))
+        i?.isTemplate = true
+        return i
+    }()
+
+    var body: some View {
+        Group {
+            if let i = Self.image { Image(nsImage: i).renderingMode(.template).resizable() } else { Image(systemName: "wifi") }
+        }
+        .frame(width: 42, height: 42)
+        .accessibilityLabel("Wi-Fi")
     }
 }
 
