@@ -5656,13 +5656,15 @@ enum ShowDesktop {
         CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
     }
 
-    /// WindowManager puts up its "Event Shield Window" (at the desktop icons' level, under the desk browser) only while
-    /// the desktop is shown.
+    /// While the desktop is shown, WindowManager swaps its "Event Shield Window" (desktop icons' level, there whenever
+    /// wallpaper clicks show the desktop) for a "ShowDesktopOverlay" above the windows (level 18). Without Screen
+    /// Recording the names read nil, so the level decides then.
     /// ponytail: read from the window list as macOS 26 has it; recheck here if focus stops following Show Desktop.
     static var isOn: Bool {
-        let shield = Int(CGWindowLevelForKey(.desktopIconWindow))
-        return (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []).contains {
-            $0[kCGWindowOwnerName as String] as? String == "WindowManager" && $0[kCGWindowLayer as String] as? Int == shield
+        (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []).contains {
+            guard $0[kCGWindowOwnerName as String] as? String == "WindowManager" else { return false }
+            if let name = $0[kCGWindowName as String] as? String, !name.isEmpty { return name == "ShowDesktopOverlay" }
+            return $0[kCGWindowLayer as String] as? Int == 18
         }
     }
 
