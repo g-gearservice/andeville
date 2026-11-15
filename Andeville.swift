@@ -805,14 +805,35 @@ final class Island {
     private let model = IslandModel()
     private var panel: NSPanel?
     private var generation = 0
+    private static let size = CGSize(width: 320, height: 240)
+
+    init() {
+        // Waking from sleep scans ~0.5 s after the display comes on, before macOS has settled the screens (the external
+        // display reattaching, the notch's safe area reported again): the island placed then sat off the notch. It
+        // follows the screens as they settle.
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.follow()
+        }
+    }
+
+    private static func frame(on screen: NSScreen) -> NSRect {
+        NSRect(x: screen.frame.midX - size.width / 2, y: screen.frame.maxY - size.height, width: size.width, height: size.height)
+    }
+
+    /// Moves the shown island back onto the notch (and to its current size) when the screens change under it.
+    func follow() {
+        guard let p = panel, let host = p.contentView as? NSHostingView<IslandView>, let screen = notchScreen() else { return }
+        let notch = notchSize(of: screen), frame = Island.frame(on: screen)
+        if host.rootView.notch != notch { host.rootView = IslandView(model: model, notch: notch) }
+        if p.frame != frame { p.setFrame(frame, display: true) }
+    }
 
     func show(_ message: String, phase: IslandPhase = .scanning, overLockScreen: Bool = false) {
         generation += 1
         panel?.orderOut(nil)
         guard let screen = notchScreen() else { return }
         let notch = notchSize(of: screen)
-        let size = CGSize(width: 320, height: 240)
-        let frame = NSRect(x: screen.frame.midX - size.width / 2, y: screen.frame.maxY - size.height, width: size.width, height: size.height)
+        let size = Island.size, frame = Island.frame(on: screen)
         let p = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         p.animationBehavior = .none
         p.isOpaque = false
@@ -5351,6 +5372,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self.unlockWithFace()
                 }
             }
+            if self.island.isShowing { self.island.follow() } // The lock screen may settle its screens without telling.
             guard let screen = notchScreen() else { return }
             let over = cursor(NSEvent.mouseLocation, isOver: notchRect(in: screen.frame, notch: notchSize(of: screen)))
             if over, !wasOver, !self.busy, Date() >= self.faceRetryAfter {
@@ -5489,6 +5511,20 @@ final class DeskBrowser {
             guard let self, self.shownOn else { return }
             self.rebuild(true)
         }
+        // Show Desktop (F11, a hot corner, a click on the desk) leaves the keyboard with the app in front, or Finder;
+        // the desk browser takes it, as the desktop it now is. macOS posts nothing for it, so its shield is watched.
+        // ponytail: polls the window list 3×/s while the browser is on; swap for an event if macOS ever posts one.
+        var wasOn = false
+        Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+            guard let self, self.shownOn else { return }
+            let on = ShowDesktop.isOn
+            defer { wasOn = on }
+            guard on, !wasOn else { return }
+            let p = NSEvent.mouseLocation, here = self.frames.values.joined().filter { $0.window.isOnActiveSpace }
+            guard let f = here.first(where: { $0.window.frame.contains(p) }) ?? here.first else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            f.window.makeKeyAndOrderFront(nil)
+        }
         // Waits out the slide, so the full-screen check sees the new front app.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -5582,6 +5618,14 @@ enum FourFingerSwipe {
 private final class DeskWindow: NSWindow {
     /// A ⌘ shortcut (key as typed, with or without ⇧); true when it was used.
     var onCommand: ((String, Bool) -> Bool)?
+
+    /// The browser is the desktop, so a click on it with windows in the way shows the desktop, as a click on the
+    /// wallpaper does (System Settings › Desktop & Dock › "Click wallpaper to reveal desktop": Always).
+    override func sendEvent(_ e: NSEvent) {
+        // The click only clears the way, as on the wallpaper: it doesn't also press a link under it.
+        if e.type == .leftMouseDown, ShowDesktop.onWallpaperClick, !ShowDesktop.isOn, ShowDesktop.windowsCover(frame) { return ShowDesktop.toggle() }
+        super.sendEvent(e)
+    }
     override var canBecomeKey: Bool { true } // Borderless windows refuse typing otherwise.
     override var canBecomeMain: Bool { true }
 
@@ -5595,6 +5639,49 @@ private final class DeskWindow: NSWindow {
                     "a": #selector(NSText.selectAll(_:)), "z": Selector(shift ? "redo:" : "undo:")]
         if let s = edit[k], !shift || k == "z" { return NSApp.sendAction(s, to: nil, from: self) }
         return onCommand?(k, shift) ?? super.performKeyEquivalent(with: e)
+    }
+}
+
+/// The Dock's Show Desktop (F11, a hot corner, a click on the wallpaper): every window moved aside.
+enum ShowDesktop {
+    /// Private CoreDock call (ApplicationServices); toggles, as F11 does.
+    static func toggle() {
+        typealias Send = @convention(c) (CFString, Int32) -> Void
+        guard let h = dlopen("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", RTLD_NOW),
+              let f = dlsym(h, "CoreDockSendNotification") else { return }
+        unsafeBitCast(f, to: Send.self)("com.apple.showdesktop.awake" as CFString, 0)
+    }
+
+    private static var windows: [[String: Any]] {
+        CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    }
+
+    /// WindowManager puts up its "Event Shield Window" (at the desktop icons' level, under the desk browser) only while
+    /// the desktop is shown.
+    /// ponytail: read from the window list as macOS 26 has it; recheck here if focus stops following Show Desktop.
+    static var isOn: Bool {
+        let shield = Int(CGWindowLevelForKey(.desktopIconWindow))
+        return (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []).contains {
+            $0[kCGWindowOwnerName as String] as? String == "WindowManager" && $0[kCGWindowLayer as String] as? Int == shield
+        }
+    }
+
+    /// Another app's ordinary window is on this screen (frame in AppKit coordinates).
+    static func windowsCover(_ frame: NSRect) -> Bool {
+        let top = NSScreen.screens.first?.frame.maxY ?? 0 // The window list counts down from the main screen's top.
+        let r = CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height)
+        let me = Int(ProcessInfo.processInfo.processIdentifier)
+        return windows.contains { w in
+            guard w[kCGWindowLayer as String] as? Int == 0, w[kCGWindowOwnerPID as String] as? Int != me,
+                  (w[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+                  let d = w[kCGWindowBounds as String] as? NSDictionary, let b = CGRect(dictionaryRepresentation: d) else { return false }
+            return b.intersects(r)
+        }
+    }
+
+    /// The setting's "Only in Stage Manager" keeps wallpaper clicks from showing the desktop.
+    static var onWallpaperClick: Bool {
+        UserDefaults(suiteName: "com.apple.WindowManager")?.object(forKey: "EnableStandardClickToShowDesktop") as? Bool ?? true
     }
 }
 
