@@ -5623,7 +5623,8 @@ private final class DeskWindow: NSWindow {
     /// wallpaper does (System Settings › Desktop & Dock › "Click wallpaper to reveal desktop": Always).
     override func sendEvent(_ e: NSEvent) {
         // The click only clears the way, as on the wallpaper: it doesn't also press a link under it.
-        if e.type == .leftMouseDown, ShowDesktop.onWallpaperClick, !ShowDesktop.isOn, ShowDesktop.windowsCover(frame) { return ShowDesktop.toggle() }
+        // Clicked again while shown, the windows come back, as from the wallpaper.
+        if e.type == .leftMouseDown, ShowDesktop.onWallpaperClick, ShowDesktop.isOn || ShowDesktop.windowsCover(frame) { return ShowDesktop.toggle() }
         super.sendEvent(e)
     }
     override var canBecomeKey: Bool { true } // Borderless windows refuse typing otherwise.
