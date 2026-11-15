@@ -4,6 +4,8 @@ cd "$(dirname "$0")"
 mkdir -p Andeville.app/Contents/MacOS Andeville.app/Contents/Resources
 cp Info.plist Andeville.app/Contents/Info.plist
 for m in models/*.mlpackage; do xcrun coremlcompiler compile "$m" Andeville.app/Contents/Resources >/dev/null; done
+# Apple's AR models of the AirPods (apple.com, "View in AR"), turned in the notch when they connect. Not in git.
+cp AirPods3D/*.usdz Andeville.app/Contents/Resources/ 2>/dev/null || true
 swiftc -swift-version 5 -target "$(uname -m)-apple-macos14.0" Andeville.swift -o Andeville.app/Contents/MacOS/Andeville
 # Now Playing reader, loaded into /usr/bin/perl at run time (see NowPlaying in Andeville.swift).
 clang -dynamiclib -fobjc-arc -framework Foundation -target "$(uname -m)-apple-macos14.0" NowPlaying.m -o Andeville.app/Contents/Resources/libnowplaying.dylib
