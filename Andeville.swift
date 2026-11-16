@@ -6351,18 +6351,31 @@ final class DuoTone: ObservableObject {
 
     /// The page's average brightness in `rect` (web view points, from its top left), 0...1.
     static func luminance(of web: WKWebView, in rect: CGRect, done: @escaping (CGFloat) -> Void) {
+        // A blank tab shows the home (the wallpaper, over the web view); the web view itself is blank white there,
+        // which read as a light page and put dark ink on a dark wallpaper.
+        // Only the home view, not the rail and bar drawn over it.
+        if web.url == nil, let home = web.window?.contentView?.subviews.first(where: { $0 is NSImageView && !$0.isHidden }) {
+            let r = web.convert(rect, to: home).intersection(home.bounds)
+            guard !r.isEmpty, let rep = home.bitmapImageRepForCachingDisplay(in: r) else { return }
+            home.cacheDisplay(in: r, to: rep)
+            return rep.cgImage.map { done(average($0)) } ?? ()
+        }
         let c = WKSnapshotConfiguration()
         c.rect = rect
         c.snapshotWidth = NSNumber(value: Double(max(rect.width / 4, 1))) // Small: only its average is wanted.
         c.afterScreenUpdates = false
         web.takeSnapshot(with: c) { img, _ in
             guard let cg = img?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-            let src = CIImage(cgImage: cg)
-            let avg = src.applyingFilter("CIAreaAverage", parameters: [kCIInputExtentKey: CIVector(cgRect: src.extent)])
-            var px = [UInt8](repeating: 0, count: 4)
-            ci.render(avg, toBitmap: &px, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
-            done((0.2126 * CGFloat(px[0]) + 0.7152 * CGFloat(px[1]) + 0.0722 * CGFloat(px[2])) / 255)
+            done(average(cg))
         }
+    }
+
+    private static func average(_ cg: CGImage) -> CGFloat {
+        let src = CIImage(cgImage: cg)
+        let avg = src.applyingFilter("CIAreaAverage", parameters: [kCIInputExtentKey: CIVector(cgRect: src.extent)])
+        var px = [UInt8](repeating: 0, count: 4)
+        ci.render(avg, toBitmap: &px, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        return (0.2126 * CGFloat(px[0]) + 0.7152 * CGFloat(px[1]) + 0.0722 * CGFloat(px[2])) / 255
     }
 
     /// Reads the page behind the bar, the status bar and the buttons. `bar` is the bar's height.
