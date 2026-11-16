@@ -5524,6 +5524,7 @@ final class DeskBrowser {
             // is shown the desk browser rises above them (still under macOS's own overlay), then settles back.
             let desk = NSWindow.Level(Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
             self.frames.values.joined().forEach { $0.window.level = on ? .floating : desk }
+            DuoTone.shared.aside = on
             guard on else { return }
             let p = NSEvent.mouseLocation, here = self.frames.values.joined().filter { $0.window.isOnActiveSpace }
             guard let f = here.first(where: { $0.window.frame.contains(p) }) ?? here.first else { return }
@@ -6319,6 +6320,8 @@ final class DuoTone: ObservableObject {
     @Published var bar = false
     @Published var status = false
     @Published var controls = false
+    /// Show Desktop is on: the rail steps in from the edge, as the windows step out to it.
+    @Published var aside = false
     static func ink(_ dark: Bool) -> Color { Color(nsColor: nsInk(dark)) }
     static func nsInk(_ dark: Bool) -> NSColor { dark ? NSColor(white: 0x1a / 255, alpha: 1) : NSColor(white: 0xf5 / 255, alpha: 1) }
 
@@ -6753,7 +6756,12 @@ struct DuoRail: View {
         .frame(width: Self.width, alignment: .trailing)
         .frame(maxHeight: .infinity)
         .frame(width: Self.hostWidth, alignment: .trailing)
+        .offset(x: tone.aside ? -Self.aside : 0)
+        .animation(.spring(duration: 0.35), value: tone.aside)
     }
+
+    /// How far the rail steps in while the desktop is shown. ponytail: by eye; tune here.
+    static let aside: CGFloat = 20
 }
 
 /// The kit's Buttons, Type=Group - Vertical, in the system's own Liquid Glass (the kit draws a picture of it): a
@@ -6806,7 +6814,7 @@ struct DuoGlassStack<Content: View>: View {
 final class DuoRailHost<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func hitTest(_ p: NSPoint) -> NSView? {
-        guard let up = superview, convert(p, from: up).x >= bounds.width - DuoRail.width else { return nil }
+        guard let up = superview, convert(p, from: up).x >= bounds.width - DuoRail.width - (DuoTone.shared.aside ? DuoRail.aside : 0) else { return nil }
         return super.hitTest(p)
     }
 }
