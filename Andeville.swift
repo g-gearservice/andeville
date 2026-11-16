@@ -5511,15 +5511,6 @@ final class DeskBrowser {
             guard let self, self.shownOn else { return }
             self.rebuild(true)
         }
-        // Show Desktop (F11, a hot corner, a click on the desk) leaves the keyboard with the app in front, or Finder;
-        // the desk browser takes it, as the desktop it now is. macOS posts nothing for it, so its shield is watched.
-        // Toggles made here (a click, Esc) report themselves at once; the poll catches the rest (F11, a hot corner).
-        // ponytail: polls the window list ~7×/s while the browser is on; swap for an event if macOS ever posts one.
-        Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
-            guard let self, self.shownOn, Date() >= self.asideHeld else { return }
-            let on = ShowDesktop.isOn
-            if on != self.aside { self.setAside(on) }
-        }
         // Waits out the slide, so the full-screen check sees the new front app.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -5559,32 +5550,6 @@ final class DeskBrowser {
         frames.values.joined().forEach { $0.window.close() }
         frames = next
         DuoMenu.shared.set(on: on && shownDuo)
-    }
-
-    private var aside = false
-    /// WindowManager's overlay lags a toggle made here; the poll waits it out rather than read the old state back.
-    private var asideHeld = Date.distantPast
-
-    /// Shows or hides the desktop from here, following along at once instead of on the next poll.
-    func toggleDesktop() {
-        ShowDesktop.toggle()
-        asideHeld = Date().addingTimeInterval(1)
-        setAside(!aside)
-    }
-
-    /// The windows moved aside stand along the screen's edges, over the Duo rail on the right: while the desktop is
-    /// shown the desk browser rises above them (still under macOS's own overlay); when it ends it drops back at once,
-    /// so the windows slide in over it as they would over the wallpaper.
-    private func setAside(_ on: Bool) {
-        aside = on
-        let desk = NSWindow.Level(Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
-        frames.values.joined().forEach { $0.window.level = on ? .floating : desk }
-        DuoTone.shared.aside = on
-        guard on else { return }
-        let p = NSEvent.mouseLocation, here = frames.values.joined().filter { $0.window.isOnActiveSpace }
-        guard let f = here.first(where: { $0.window.frame.contains(p) }) ?? here.first else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        f.window.makeKeyAndOrderFront(nil)
     }
 
     /// Four fingers moving down: the address bar of the screen under the cursor comes down, ready for field.
@@ -5640,13 +5605,11 @@ private final class DeskWindow: NSWindow {
     /// A ⌘ shortcut (key as typed, with or without ⇧); true when it was used.
     var onCommand: ((String, Bool) -> Bool)?
 
-    /// The browser is the desktop, so a click on it with windows in the way shows the desktop, as a click on the
-    /// wallpaper does (System Settings › Desktop & Dock › "Click wallpaper to reveal desktop": Always).
+    /// The browser is the desktop, so a click on it with other windows in the way clears them off (`ShowDesktop`).
+    /// That click only clears the way; it doesn't also press a link under it. Esc brings the windows back.
     override func sendEvent(_ e: NSEvent) {
-        // The click only clears the way, as on the wallpaper: it doesn't also press a link under it.
-        // While shown, clicks go to the page; Esc brings the windows back.
-        if e.type == .leftMouseDown, ShowDesktop.onWallpaperClick, !ShowDesktop.isOn, ShowDesktop.windowsCover(frame) { return DeskBrowser.shared.toggleDesktop() }
-        if e.type == .keyDown, e.keyCode == 53, ShowDesktop.isOn { return DeskBrowser.shared.toggleDesktop() }
+        if e.type == .leftMouseDown, ShowDesktop.windowsCover(frame) { return ShowDesktop.show(self) }
+        if e.type == .keyDown, e.keyCode == 53, ShowDesktop.isOn { return ShowDesktop.restore() }
         super.sendEvent(e)
     }
     override var canBecomeKey: Bool { true } // Borderless windows refuse typing otherwise.
@@ -5665,30 +5628,28 @@ private final class DeskWindow: NSWindow {
     }
 }
 
-/// The Dock's Show Desktop (F11, a hot corner, a click on the wallpaper): every window moved aside.
+/// The desk browser's own Show Desktop (not the Dock's): the other apps with windows out are hidden, and Esc brings
+/// back those same apps, with the one that was in front in front again.
 enum ShowDesktop {
-    /// Private CoreDock call (ApplicationServices); toggles, as F11 does.
-    static func toggle() {
-        typealias Send = @convention(c) (CFString, Int32) -> Void
-        guard let h = dlopen("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", RTLD_NOW),
-              let f = dlsym(h, "CoreDockSendNotification") else { return }
-        unsafeBitCast(f, to: Send.self)("com.apple.showdesktop.awake" as CFString, 0)
+    private static var hidden: [NSRunningApplication] = [], front: NSRunningApplication?
+    static var isOn: Bool { !hidden.isEmpty }
+
+    static func show(_ desk: NSWindow) {
+        let me = NSRunningApplication.current
+        if !isOn { front = NSWorkspace.shared.frontmostApplication.flatMap { $0 == me ? nil : $0 } }
+        let apps = NSWorkspace.shared.runningApplications.filter { $0 != me && $0.activationPolicy == .regular && !$0.isHidden }
+        apps.forEach { $0.hide() }
+        hidden += apps.filter { !hidden.contains($0) } // A click again after ⌘-Tab brought one back.
+        NSApp.activate(ignoringOtherApps: true)
+        desk.makeKeyAndOrderFront(nil)
     }
 
-    private static var windows: [[String: Any]] {
-        CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-    }
-
-    /// While the desktop is shown, WindowManager swaps its "Event Shield Window" (desktop icons' level, there whenever
-    /// wallpaper clicks show the desktop) for a "ShowDesktopOverlay" above the windows (level 18). Without Screen
-    /// Recording the names read nil, so the level decides then.
-    /// ponytail: read from the window list as macOS 26 has it; recheck here if focus stops following Show Desktop.
-    static var isOn: Bool {
-        (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []).contains {
-            guard $0[kCGWindowOwnerName as String] as? String == "WindowManager" else { return false }
-            if let name = $0[kCGWindowName as String] as? String, !name.isEmpty { return name == "ShowDesktopOverlay" }
-            return $0[kCGWindowLayer as String] as? Int == 18
-        }
+    static func restore() {
+        let apps = hidden
+        hidden = []
+        apps.forEach { $0.unhide() }
+        front?.activate()
+        front = nil
     }
 
     /// Another app's ordinary window is on this screen (frame in AppKit coordinates).
@@ -5704,9 +5665,8 @@ enum ShowDesktop {
         }
     }
 
-    /// The setting's "Only in Stage Manager" keeps wallpaper clicks from showing the desktop.
-    static var onWallpaperClick: Bool {
-        UserDefaults(suiteName: "com.apple.WindowManager")?.object(forKey: "EnableStandardClickToShowDesktop") as? Bool ?? true
+    private static var windows: [[String: Any]] {
+        CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
     }
 }
 
@@ -6335,8 +6295,6 @@ final class DuoTone: ObservableObject {
     @Published var bar = false
     @Published var status = false
     @Published var controls = false
-    /// Show Desktop is on: the rail steps in from the edge, as the windows step out to it.
-    @Published var aside = false
     static func ink(_ dark: Bool) -> Color { Color(nsColor: nsInk(dark)) }
     static func nsInk(_ dark: Bool) -> NSColor { dark ? NSColor(white: 0x1a / 255, alpha: 1) : NSColor(white: 0xf5 / 255, alpha: 1) }
 
@@ -6784,12 +6742,7 @@ struct DuoRail: View {
         .frame(width: Self.width, alignment: .trailing)
         .frame(maxHeight: .infinity)
         .frame(width: Self.hostWidth, alignment: .trailing)
-        .offset(x: tone.aside ? -Self.aside : 0)
-        .animation(.easeInOut(duration: 0.3), value: tone.aside) // ponytail: by eye against macOS's slide; tune here.
     }
-
-    /// How far the rail steps in while the desktop is shown. ponytail: by eye; tune here.
-    static let aside: CGFloat = 20
 }
 
 /// The kit's Buttons, Type=Group - Vertical, in the system's own Liquid Glass (the kit draws a picture of it): a
@@ -6842,7 +6795,7 @@ struct DuoGlassStack<Content: View>: View {
 final class DuoRailHost<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func hitTest(_ p: NSPoint) -> NSView? {
-        guard let up = superview, convert(p, from: up).x >= bounds.width - DuoRail.width - (DuoTone.shared.aside ? DuoRail.aside : 0) else { return nil }
+        guard let up = superview, convert(p, from: up).x >= bounds.width - DuoRail.width else { return nil }
         return super.hitTest(p)
     }
 }
