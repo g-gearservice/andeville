@@ -5513,23 +5513,12 @@ final class DeskBrowser {
         }
         // Show Desktop (F11, a hot corner, a click on the desk) leaves the keyboard with the app in front, or Finder;
         // the desk browser takes it, as the desktop it now is. macOS posts nothing for it, so its shield is watched.
-        // ponytail: polls the window list 3×/s while the browser is on; swap for an event if macOS ever posts one.
-        var wasOn = false
-        Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
-            guard let self, self.shownOn else { return }
+        // Toggles made here (a click, Esc) report themselves at once; the poll catches the rest (F11, a hot corner).
+        // ponytail: polls the window list ~7×/s while the browser is on; swap for an event if macOS ever posts one.
+        Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+            guard let self, self.shownOn, Date() >= self.asideHeld else { return }
             let on = ShowDesktop.isOn
-            defer { wasOn = on }
-            guard on != wasOn else { return }
-            // The windows moved aside stand along the screen's edges, over the Duo rail on the right: while the desktop
-            // is shown the desk browser rises above them (still under macOS's own overlay), then settles back.
-            let desk = NSWindow.Level(Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
-            self.frames.values.joined().forEach { $0.window.level = on ? .floating : desk }
-            DuoTone.shared.aside = on
-            guard on else { return }
-            let p = NSEvent.mouseLocation, here = self.frames.values.joined().filter { $0.window.isOnActiveSpace }
-            guard let f = here.first(where: { $0.window.frame.contains(p) }) ?? here.first else { return }
-            NSApp.activate(ignoringOtherApps: true)
-            f.window.makeKeyAndOrderFront(nil)
+            if on != self.aside { self.setAside(on) }
         }
         // Waits out the slide, so the full-screen check sees the new front app.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -5570,6 +5559,32 @@ final class DeskBrowser {
         frames.values.joined().forEach { $0.window.close() }
         frames = next
         DuoMenu.shared.set(on: on && shownDuo)
+    }
+
+    private var aside = false
+    /// WindowManager's overlay lags a toggle made here; the poll waits it out rather than read the old state back.
+    private var asideHeld = Date.distantPast
+
+    /// Shows or hides the desktop from here, following along at once instead of on the next poll.
+    func toggleDesktop() {
+        ShowDesktop.toggle()
+        asideHeld = Date().addingTimeInterval(1)
+        setAside(!aside)
+    }
+
+    /// The windows moved aside stand along the screen's edges, over the Duo rail on the right: while the desktop is
+    /// shown the desk browser rises above them (still under macOS's own overlay); when it ends it drops back at once,
+    /// so the windows slide in over it as they would over the wallpaper.
+    private func setAside(_ on: Bool) {
+        aside = on
+        let desk = NSWindow.Level(Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
+        frames.values.joined().forEach { $0.window.level = on ? .floating : desk }
+        DuoTone.shared.aside = on
+        guard on else { return }
+        let p = NSEvent.mouseLocation, here = frames.values.joined().filter { $0.window.isOnActiveSpace }
+        guard let f = here.first(where: { $0.window.frame.contains(p) }) ?? here.first else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        f.window.makeKeyAndOrderFront(nil)
     }
 
     /// Four fingers moving down: the address bar of the screen under the cursor comes down, ready for field.
@@ -5630,8 +5645,8 @@ private final class DeskWindow: NSWindow {
     override func sendEvent(_ e: NSEvent) {
         // The click only clears the way, as on the wallpaper: it doesn't also press a link under it.
         // While shown, clicks go to the page; Esc brings the windows back.
-        if e.type == .leftMouseDown, ShowDesktop.onWallpaperClick, !ShowDesktop.isOn, ShowDesktop.windowsCover(frame) { return ShowDesktop.toggle() }
-        if e.type == .keyDown, e.keyCode == 53, ShowDesktop.isOn { return ShowDesktop.toggle() }
+        if e.type == .leftMouseDown, ShowDesktop.onWallpaperClick, !ShowDesktop.isOn, ShowDesktop.windowsCover(frame) { return DeskBrowser.shared.toggleDesktop() }
+        if e.type == .keyDown, e.keyCode == 53, ShowDesktop.isOn { return DeskBrowser.shared.toggleDesktop() }
         super.sendEvent(e)
     }
     override var canBecomeKey: Bool { true } // Borderless windows refuse typing otherwise.
@@ -6757,7 +6772,7 @@ struct DuoRail: View {
         .frame(maxHeight: .infinity)
         .frame(width: Self.hostWidth, alignment: .trailing)
         .offset(x: tone.aside ? -Self.aside : 0)
-        .animation(.spring(duration: 0.35), value: tone.aside)
+        .animation(.easeInOut(duration: 0.3), value: tone.aside) // ponytail: by eye against macOS's slide; tune here.
     }
 
     /// How far the rail steps in while the desktop is shown. ponytail: by eye; tune here.
