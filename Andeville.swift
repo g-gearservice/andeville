@@ -5519,7 +5519,12 @@ final class DeskBrowser {
             guard let self, self.shownOn else { return }
             let on = ShowDesktop.isOn
             defer { wasOn = on }
-            guard on, !wasOn else { return }
+            guard on != wasOn else { return }
+            // The windows moved aside stand along the screen's edges, over the Duo rail on the right: while the desktop
+            // is shown the desk browser rises above them (still under macOS's own overlay), then settles back.
+            let desk = NSWindow.Level(Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
+            self.frames.values.joined().forEach { $0.window.level = on ? .floating : desk }
+            guard on else { return }
             let p = NSEvent.mouseLocation, here = self.frames.values.joined().filter { $0.window.isOnActiveSpace }
             guard let f = here.first(where: { $0.window.frame.contains(p) }) ?? here.first else { return }
             NSApp.activate(ignoringOtherApps: true)
