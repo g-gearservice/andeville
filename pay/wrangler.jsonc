@@ -1,0 +1,30 @@
+{
+  // Payment plate, kept apart from the marketing site. Run from pay/:
+  // Test:  npx -y wrangler@4 deploy --env=""          -> https://andeville-pay.gearservice.workers.dev (Paddle sandbox)
+  // Live:  npx -y wrangler@4 deploy --env production  -> https://pay.andeville.app
+  // Secrets per env: PADDLE_WEBHOOK_SECRET (and TURNSTILE_SECRET in production)
+  "name": "andeville-pay",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-17",
+  "observability": { "enabled": true },
+  "workers_dev": true,
+  "assets": { "directory": "public", "run_worker_first": ["/api/*"] },
+  "kv_namespaces": [{ "binding": "LICENCES", "id": "0e3bb059834c4a299dd4bc541e6fef64" }],
+  "vars": {
+    "PADDLE_ENV": "sandbox",
+    "PADDLE_CLIENT_TOKEN": "test_c8f7609391df49d817c468bba60",
+    "PADDLE_PRICE_ID": "pri_01m7sb1fpge1paqp4a3cx5026q",
+    "TURNSTILE_SECRET": "1x0000000000000000000000000000000AA" // Cloudflare's always-pass test secret
+  },
+  "env": {
+    "production": {
+      "name": "andeville-pay-live",
+      "workers_dev": false,
+      "routes": [{ "pattern": "pay.andeville.app", "custom_domain": true }],
+      "kv_namespaces": [{ "binding": "LICENCES", "id": "1f809299ba71406d91616721deb5c4f8" }],
+      // Open since 2026-11-20 (Paddle verified). An empty PADDLE_CLIENT_TOKEN closes checkout again (503).
+      // Product pro_01m7sm2p3c0m2bht68e3r0tt2p, webhook ntfset_01m7sm2pxr7yjhk9z0zz9wfh7d -> https://pay.andeville.app/api/paddle.
+      "vars": { "PADDLE_ENV": "production", "PADDLE_CLIENT_TOKEN": "live_78f3bab1c3d4c5fa3907a62ddcf", "PADDLE_PRICE_ID": "pri_01m7sm2pb09z73yhe4mw6mafnt" }
+    }
+  }
+}

@@ -1,3 +1,10 @@
 .DS_Store
 Andeville.app/
 *.dmg
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get Andeville · Payment</title>
+<meta name="description" content="Buy Andeville: a personal licence for one Mac, $11.11 once.">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#262626">
+<link rel="preload" href="PretendardVariable.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face{font-family:"Pretendard";src:url("PretendardVariable.woff2") format("woff2");font-weight:45 920;font-display:swap}
+:root{--acc:#ff5b14;--ink:#f1f0ec;--mute:#a3a29d;--line:#3a3a39;--bg:#262626;--card:#1e1e1d;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;display:grid;grid-template-rows:1fr auto;background:var(--bg);color:var(--ink);font-family:Pretendard,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+main{display:grid;place-items:center;padding:48px 16px}
+.card{width:100%;max-width:420px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:28px}
+.lbl{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+h1{margin:6px 0 2px;font-size:28px;font-weight:850}
+.price{font-size:44px;font-weight:880;margin:18px 0 4px}
+p{margin:0;color:var(--mute);line-height:1.5}
+#ts{margin:22px 0 14px;min-height:65px}
+button{width:100%;height:48px;border:0;border-radius:999px;background:var(--ink);color:#111;font:inherit;font-weight:750;font-size:16px;cursor:pointer}
+button:disabled{opacity:.35;cursor:default}
+button:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
+#msg{margin-top:16px;min-height:1.5em;color:var(--ink);word-break:break-word}
+#msg b{font-family:ui-monospace,Menlo,monospace;font-size:17px;letter-spacing:.04em;user-select:all;white-space:nowrap}
+.back{display:inline-block;margin-top:18px;color:var(--mute);font-size:14px}
+footer{padding:20px 16px 28px;text-align:center;font-size:12px;color:var(--mute);line-height:1.7}
+footer b{color:var(--ink);font-weight:650}
+</style>
+</head>
+<body>
+<main>
+  <section class="card" aria-labelledby="h">
+    <div class="lbl">Personal licence · one Mac · one-time</div>
+    <h1 id="h">Andeville</h1>
+    <p>Face unlock, App Lock, now playing, AirPods, fill light, Labs and Control Center controls.</p>
+    <div class="price">$11.11</div>
+    <p>Taxes are worked out at checkout. Refunds within 14 days.</p>
+    <div id="ts" aria-label="Bot check"></div>
+    <button id="pay" type="button" disabled>Pay $11.11</button>
+    <div id="msg" role="status" aria-live="polite"></div>
+    <a class="back" href="https://andeville.app/">← Back to andeville.app</a>
+  </section>
+</main>
+<footer>
+  <div><b>Payment vanguard</b> · g.gear service vanguard team</div>
+  <div>g.gear service delta · Payments by Paddle.com, Merchant of Record</div>
+</footer>
+<script src="pay.js?v=4"></script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstile" async defer></script>
+</body>
+</html>

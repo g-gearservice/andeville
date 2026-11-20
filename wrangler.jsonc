@@ -1,0 +1,51 @@
+{
+  // Test:  npx -y wrangler@4 deploy --env=""          -> https://andeville.gearservice.workers.dev
+  // Live:  npx -y wrangler@4 deploy --env production  -> https://andeville.app
+  "name": "andeville",
+  "compatibility_date": "2026-11-17",
+  "observability": {
+    "enabled": true
+  },
+  "workers_dev": true,
+  // The pages are static (site/); /api/* is api/worker.js: Google sign-in, accounts, the licence a purchase is claimed
+  // into, and the DMG download. Payments live in pay/ (pay.andeville.app), its own Worker; both share the LICENCES KV.
+  "main": "api/worker.js",
+  "assets": {
+    "directory": "site",
+    "run_worker_first": ["/api/*"]
+  },
+  // Test (sandbox) bindings. Not inherited by env.production, which has its own below.
+  "kv_namespaces": [
+    { "binding": "ACCOUNTS", "id": "e3a7361c53a64077a7002d21efeb8144" },
+    { "binding": "LICENCES", "id": "0e3bb059834c4a299dd4bc541e6fef64" }
+  ],
+  "r2_buckets": [{ "binding": "DOWNLOADS", "bucket_name": "andeville-downloads-test" }],
+  // DEV_LOGIN_TOKEN (test site only, POST /api/auth/dev signs in without Google) is not kept in this file: set it as
+  // a secret with `wrangler secret put DEV_LOGIN_TOKEN --env=""` when a test sign-in is wanted.
+  "vars": {
+    "GOOGLE_CLIENT_ID": "423227577520-jaun81kq830onmtecrgqudicqj70j50m.apps.googleusercontent.com", // Google Cloud Console › OAuth client (Web); its JavaScript origins must list this site
+    "PAY_URL": "https://andeville-pay.gearservice.workers.dev",
+    "DMG_KEY": "Andeville-0.3.dmg"
+  },
+  "env": {
+    "production": {
+      "name": "andeville-app",
+      "workers_dev": false,
+      "routes": [
+        { "pattern": "andeville.app", "custom_domain": true },
+        { "pattern": "www.andeville.app", "custom_domain": true }
+      ],
+      // Live bindings: its own accounts and downloads, the pay plate's live LICENCES. Never set DEV_LOGIN_TOKEN here.
+      "kv_namespaces": [
+        { "binding": "ACCOUNTS", "id": "a11bb2ff1fa94b8a986fc834d3bb9689" },
+        { "binding": "LICENCES", "id": "1f809299ba71406d91616721deb5c4f8" }
+      ],
+      "r2_buckets": [{ "binding": "DOWNLOADS", "bucket_name": "andeville-downloads" }],
+      "vars": {
+        "GOOGLE_CLIENT_ID": "423227577520-jaun81kq830onmtecrgqudicqj70j50m.apps.googleusercontent.com",
+        "PAY_URL": "https://pay.andeville.app",
+        "DMG_KEY": "Andeville-0.3.dmg"
+      }
+    }
+  }
+}
