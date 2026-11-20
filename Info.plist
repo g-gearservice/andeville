@@ -6,6 +6,8 @@
 	<string>Andeville</string>
 	<key>CFBundleExecutable</key>
 	<string>Andeville</string>
+	<key>CFBundleIconFile</key>
+	<string>Andeville</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.ggear.faytai</string>
 	<key>CFBundleName</key>
