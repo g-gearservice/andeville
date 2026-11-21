@@ -6,6 +6,8 @@
 	<string>Andeville</string>
 	<key>CFBundleExecutable</key>
 	<string>Andeville</string>
+	<key>CFBundleIconFile</key>
+	<string>Andeville</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.ggear.faytai</string>
 	<key>CFBundleName</key>
@@ -13,7 +15,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.3</string>
+	<string>0.3.1</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

@@ -1,0 +1,621 @@
+@font-face{font-family:"Pretendard";src:url("fonts/PretendardVariable.woff2") format("woff2");font-weight:45 920;font-display:swap}
+:root{--gut:clamp(16px,2.4vw,32px);--col:980px;--acc:#ff5b14;--ink:#f1f0ec;--bg:#262626;color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+/* every page scrolls as About does: Lenis from gg.js (lerp .07, wheel .7); native smooth scrolling would fight it */
+html.lenis,html.lenis body{height:auto}
+html.lenis{scroll-behavior:auto}
+.lenis.lenis-stopped{overflow:clip}
+.lenis [data-lenis-prevent]{overscroll-behavior:contain}
+html.scroll-locked{overflow:hidden}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Pretendard,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+main{display:block;overflow-x:clip}
+h1,h2{margin:0;font-weight:850}
+.w{max-width:calc(var(--col) + 2 * var(--gut));margin:0 auto;padding:0 var(--gut)} /* content edges = the bar's edges */
+.lbl{font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:#a8a8a2}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 22px;background:var(--ink);color:#1c1c1c;text-decoration:none;font-weight:750;font-size:15px;transition:background .2s}
+.btn:hover{background:var(--acc)}
+.btn.acc{background:var(--acc)}
+.btn.acc:hover{background:var(--ink)}
+.btn.get{background:#3e3e3b;color:var(--ink)} /* Get Andeville: a grey button, not the brand orange */
+.btn.get:hover{background:var(--acc);color:#1c1c1c} /* quiet at rest, orange as it answers you */
+.ghost{display:inline-flex;align-items:center;min-height:36px;padding:0 14px;border:1px solid #5a5a56;text-decoration:none;font-size:13px;font-weight:650}
+.ghost:hover{border-color:var(--ink)}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.sec{padding-top:clamp(112px,14vw,180px)}
+.h2{font-size:clamp(36px,4.4vw,58px);letter-spacing:-.045em}
+
+/* product bar */
+.pbar{position:sticky;top:12px;z-index:20;padding:12px var(--gut) 0}
+/* screen-top blur, from gdotgear.services' header (Header.astro .blur.top, header hidden: html.nav-up): six layers,
+   each blurred at one strength (1-32px) and masked to a band of the fade, strongest at the edge, clear by 62.4px, no scrim */
+.edge{position:fixed;top:0;left:0;right:0;height:64px;z-index:19;pointer-events:none;display:grid}
+.edge i{grid-area:1/1;-webkit-mask:linear-gradient(#000 var(--m0),transparent var(--m1));mask:linear-gradient(#000 var(--m0),transparent var(--m1))}
+.edge i:nth-child(1){-webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px);--m0:41.6px;--m1:62.4px}
+.edge i:nth-child(2){-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);--m0:31.2px;--m1:52px}
+.edge i:nth-child(3){-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);--m0:20.8px;--m1:41.6px}
+.edge i:nth-child(4){-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);--m0:10.4px;--m1:31.2px}
+.edge i:nth-child(5){-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);--m0:0px;--m1:20.8px}
+.edge i:nth-child(6){-webkit-backdrop-filter:blur(32px);backdrop-filter:blur(32px);--m0:0px;--m1:10.4px}
+/* phone Safari draws no backdrop layer under its bars (a hard strip instead): none there, as on the original */
+@media (pointer:coarse) and (display-mode:browser){.edge{display:none}}
+.pbar>div{max-width:var(--col);margin:0 auto;display:flex;align-items:center;gap:12px;min-height:52px;padding:0 10px 0 18px;background:rgba(28,28,28,.92);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid #3a3a38}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none}
+.brand b{font-size:16px;font-weight:750;letter-spacing:-.01em}
+.live-mk{width:38px;height:28px;overflow:visible;fill:var(--ink);transition:fill .25s}
+.brand:hover .live-mk{fill:var(--acc)}
+.pbar nav{display:flex;gap:20px;margin-left:24px;font-size:13px;color:#c9c8c2}
+.pbar nav a{text-decoration:none}
+.pbar nav a:hover{color:var(--ink)}
+.pbar .ghost{margin-left:auto}
+.pbar .btn{min-height:36px;padding:0 16px;font-size:13px}
+
+/* hero */
+.hero{padding-top:clamp(64px,20vh,200px);padding-top:clamp(64px,20svh,200px);text-align:center} /* headline in the upper third: low enough to land, close enough to the bar not to leave it empty */
+.hero h1{margin:0 auto;font-size:clamp(34px,6.4vw,80px);line-height:1.05;letter-spacing:-.055em}
+/* intro: the slogan owns the first 3 seconds, then the rest of the hero arrives */
+/* one headline that rewrites itself: words swap through a blur, slot widths slide */
+.hero h1 em{font-style:normal;color:#9a9a95}
+.sl{display:inline-grid;vertical-align:bottom;white-space:pre;transition:width 1s cubic-bezier(.65,0,.35,1)}
+.sl>span{grid-area:1/1;justify-self:start;opacity:0;filter:blur(14px);transition:opacity .8s ease,filter 1s ease}
+.sl>span.on{opacity:1;filter:blur(0)}
+.sl .acc{color:#9a9a95} /* "one." stands apart in grey, not the brand orange */
+/* first entry, like dominoes: MacBook rises, then the buttons, then the headline (both out of a blur) */
+.js .hero:not(.go) .rise{opacity:0}
+.go .rise{animation:rise 1s cubic-bezier(.16,1,.3,1) both}
+.go .r2,.go .r3{animation-name:riseBlur}
+.go .r2{animation-delay:.22s}
+.go .r3{animation-delay:.44s}
+@keyframes rise{0%{opacity:0;transform:translateY(72px)}100%{opacity:1;transform:none}}
+@keyframes riseBlur{0%{opacity:0;transform:translateY(40px);filter:blur(14px)}100%{opacity:1;transform:none;filter:blur(0)}}
+.hero p{margin:20px auto 0;max-width:46ch;font-size:clamp(17px,1.6vw,20px);line-height:1.55;color:#cfcfca}
+.hero .cta{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:12px 20px;margin-top:clamp(88px,10vw,128px)}
+.hero .cta>a:not(.btn){font-weight:650;text-underline-offset:5px}
+.hero .lbl{margin-top:14px}
+.mac{margin:clamp(40px,6vw,72px) auto 0} /* the display frame on the grid; its base reaches 4% past it each side, into the gutter */
+.lid{position:relative;aspect-ratio:16/10;background:#050505;border-radius:18px 18px 0 0;padding:1.4%}
+.base{height:14px;background:#8f8f8a;border-radius:0 0 12px 12px;margin:0 -4%;position:relative}
+.base i{position:absolute;left:50%;top:0;width:14%;height:6px;transform:translateX(-50%);background:#6f6f6b;border-radius:0 0 8px 8px}
+.screen{all:unset;cursor:pointer;position:absolute;inset:1.4% .9% 0;border-radius:12px 12px 0 0;background:#141414;transition:background .5s;overflow:hidden;display:block}
+.screen .bar{padding:0 8px}
+.screen:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.h-clock{position:absolute;left:0;right:0;top:30%;text-align:center;font-size:clamp(48px,9vw,120px);font-weight:850;letter-spacing:-.05em;transition:color .5s}
+.h-isl{width:17%;height:5.2%;transition:width .55s cubic-bezier(.34,1.3,.5,1),height .55s cubic-bezier(.34,1.3,.5,1);flex-direction:column;gap:8px;padding-top:6px}
+.h-isl svg,.h-isl span{opacity:0;transition:fill .3s,opacity .3s}
+.h-isl svg{width:80px;height:34px;fill:var(--ink)}
+.h-isl span{font-size:13px;font-weight:700}
+.h-hint{position:absolute;left:0;right:0;bottom:14px;color:#8c8c87}
+.screen[data-hero=scan]{background:#e9e8e2}
+.screen[data-hero=scan] .h-clock{color:#c9c8c2}
+.screen[data-hero=ok]{background:#2d2d2b}
+.screen[data-hero=ok] .h-clock{color:transparent}
+.screen:not([data-hero=idle]) .h-isl{width:34%;height:30%}
+.screen:not([data-hero=idle]) .h-isl svg,.screen:not([data-hero=idle]) .h-isl span{opacity:1}
+.screen[data-hero=ok] .h-isl svg{fill:var(--acc)}
+
+/* shared screen pieces */
+.bar{position:absolute;left:0;right:0;top:0;height:22px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-size:10px;font-weight:600;color:#9a9a95}
+.isl{position:absolute;top:0;left:50%;transform:translateX(-50%);background:#000;color:var(--ink);border-radius:0 0 22px 22px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.win{position:absolute;background:#2d2d2b;border-top:14px solid #3a3a38}
+.ln{display:block;height:7px;background:#4a4a46;margin:8px 10px 0}
+
+/* carousel */
+.car{margin-top:40px;overflow:hidden}
+.track{--step:86%;--lead:8%;display:flex;gap:2%;transform:translateX(calc(var(--lead) + var(--step) * var(--pos,-7)));transition:transform .8s cubic-bezier(.65,0,.35,1);will-change:transform}
+.track.snap,.track.snap .slide{transition:none}
+.slide{position:relative;flex:0 0 84%;min-width:0;background:#0e0e0e;cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:32px;padding:clamp(24px,4vw,56px);min-height:clamp(420px,46vw,620px);opacity:.45;transition:opacity .6s}
+.slide.on{opacity:1;cursor:default}
+.cap{flex:1 1 280px;min-width:0;margin:0;font-size:clamp(20px,2vw,27px);line-height:1.25;font-weight:650;letter-spacing:-.02em;max-width:22ch}
+.cap .tag{display:block;margin-top:14px;font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:#8c8c87}
+.scr{flex:1.6 1 420px;min-width:0;position:relative;aspect-ratio:16/10;background:#191919;overflow:hidden;border:10px solid #050505;border-bottom-width:0;border-radius:14px 14px 0 0;align-self:flex-end;margin-bottom:calc(-1 * clamp(24px,4vw,56px))}
+.peek{all:unset;position:absolute;inset:0;cursor:pointer;z-index:2}
+.slide.on .peek{display:none}
+.ctl{display:flex;justify-content:center;gap:14px;margin-top:36px}
+.dots{display:flex;align-items:center;gap:10px;padding:0 18px;min-height:56px;background:#333331}
+.dot{all:unset;cursor:pointer;width:8px;height:8px;background:#8c8c87;position:relative;overflow:hidden;transition:width .4s cubic-bezier(.65,0,.35,1),background .3s}
+.dot[aria-selected=true]{width:48px;background:#5a5a56}
+.dot i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--ink);transition:width .1s linear}
+.pp{all:unset;cursor:pointer;width:56px;height:56px;display:grid;place-items:center;background:#333331}
+.pp .play,.paused .pp .pause{display:none}
+.paused .pp .play{display:block}
+
+/* scenes: every element shows its END state by default; keyframes run only on the active slide */
+.on .a{animation-duration:6.2s;animation-fill-mode:both;animation-timing-function:cubic-bezier(.65,0,.35,1)}
+.paused .a,.paused .eq i{animation-play-state:paused}
+.cur{position:absolute;width:18px;height:18px;opacity:0}
+
+/* 01 face unlock */
+.f-clock{position:absolute;left:0;right:0;top:30%;text-align:center;font-size:clamp(40px,6vw,76px);font-weight:820;letter-spacing:-.05em;opacity:0}
+.f-veil{position:absolute;inset:22px 0 0;background:#151515;opacity:0}
+.f-isl{width:190px;height:30px;flex-direction:column}
+.f-mk{width:70px;height:30px;fill:var(--acc);opacity:0}
+.f-t1,.f-t2{position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:12px;font-weight:700;opacity:0}
+.on .f-clock{animation-name:fClock}.on .f-veil{animation-name:fVeil}.on .f-isl{animation-name:fIsl}.on .f-mk{animation-name:fMk}
+.on .f-t1{animation-name:fT1}.on .f-t2{animation-name:fT2}.on .f-cur{animation-name:fCur}
+@keyframes fClock{0%,70%{opacity:1;transform:none}82%,100%{opacity:0;transform:translateY(-10px)}}
+@keyframes fVeil{0%,72%{opacity:1}86%,100%{opacity:0}}
+@keyframes fIsl{0%,24%{width:150px;height:28px}34%,68%{width:min(300px,70%);height:46%}80%,100%{width:190px;height:30px}}
+@keyframes fMk{0%,28%{opacity:0;fill:#6b6b66}36%{opacity:1;fill:#6b6b66}50%{fill:#f1f0ec}56%,68%{opacity:1;fill:var(--acc)}74%,100%{opacity:0}}
+@keyframes fT1{0%,32%{opacity:0}38%,52%{opacity:1}56%,100%{opacity:0}}
+@keyframes fT2{0%,55%{opacity:0}59%,68%{opacity:1}72%,100%{opacity:0}}
+@keyframes fCur{0%{opacity:1;left:78%;top:82%}26%{opacity:1;left:51%;top:6%}32%,100%{opacity:0;left:51%;top:6%}}
+
+/* 02 app lock */
+.l-win{left:16%;top:22%;width:68%;height:68%}
+.l-blur{position:absolute;inset:0;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);background:rgba(20,20,20,.35);opacity:0}
+.l-card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:#0b0b0b;padding:14px 18px;font-size:12px;font-weight:700;white-space:nowrap;display:flex;align-items:center;gap:8px;opacity:0}
+.l-isl{width:150px;height:28px}
+.l-mk{width:60px;height:26px;fill:#6b6b66;opacity:0}
+.on .l-win{animation-name:lWin}.on .l-blur{animation-name:lBlur}.on .l-card{animation-name:lCard}.on .l-isl{animation-name:lIsl}.on .l-mk{animation-name:lMk}
+@keyframes lWin{0%{transform:scale(.9);opacity:0}12%,100%{transform:none;opacity:1}}
+@keyframes lBlur{0%,10%{opacity:1}64%{opacity:1}74%,100%{opacity:0}}
+@keyframes lCard{0%,14%{opacity:0;transform:translate(-50%,-40%)}22%,60%{opacity:1;transform:translate(-50%,-50%)}70%,100%{opacity:0;transform:translate(-50%,-50%) scale(.96)}}
+@keyframes lIsl{0%,26%{width:150px;height:28px}36%,62%{width:min(260px,60%);height:38%}74%,100%{width:150px;height:28px}}
+@keyframes lMk{0%,30%{opacity:0}38%{opacity:1;fill:#6b6b66}52%,62%{opacity:1;fill:var(--acc)}70%,100%{opacity:0}}
+
+/* 03 now playing */
+.m-isl{width:min(420px,88%);height:62px;justify-content:flex-start;gap:12px;padding:10px 16px 0}
+.m-art{width:38px;height:38px;flex:none;background:var(--acc);display:grid;place-items:center;color:#1c1c1c}
+.m-art svg{width:22px;height:10px}
+.m-tt{position:relative;flex:1;min-width:0;height:34px;overflow:hidden;font-size:13px;line-height:1.3}
+.m-tt>span{position:absolute;left:0;top:0;white-space:nowrap}
+.m-tt small{color:#8c8c87;font-size:inherit}
+.m-a{opacity:0}
+.eq{display:flex;align-items:flex-end;gap:3px;height:26px}
+.eq i{display:block;width:4px;height:100%;background:var(--acc);transform-origin:bottom;transform:scaleY(.4)}
+.on .eq i{animation:eq .9s ease-in-out infinite alternate}
+.eq i:nth-child(2){animation-delay:-.3s}.eq i:nth-child(3){animation-delay:-.6s}.eq i:nth-child(4){animation-delay:-.2s}.eq i:nth-child(5){animation-delay:-.75s}.eq i:nth-child(6){animation-delay:-.45s}
+@keyframes eq{0%{transform:scaleY(.2)}100%{transform:scaleY(1)}}
+.m-swipe{position:absolute;top:30px;width:40px;height:3px;background:var(--ink);opacity:0}
+.on .m-isl{animation-name:mIsl}.on .m-a{animation-name:mA}.on .m-b{animation-name:mB}.on .m-swipe{animation-name:mSwipe}
+@keyframes mIsl{0%{width:150px;height:28px}14%,100%{width:min(420px,88%);height:62px}}
+@keyframes mA{0%,12%{opacity:0;transform:none}18%,48%{opacity:1;transform:none}56%,100%{opacity:0;transform:translateX(60px)}}
+@keyframes mB{0%,52%{opacity:0;transform:translateX(-60px)}62%,100%{opacity:1;transform:none}}
+@keyframes mSwipe{0%,40%{opacity:0;left:30%}44%{opacity:1;left:30%}56%{opacity:1;left:62%}60%,100%{opacity:0;left:62%}}
+
+/* 04 airpods */
+.p-isl{width:min(400px,86%);height:64px;justify-content:flex-start;gap:14px;padding:10px 18px 0}
+.p-pods{width:40px;height:40px;fill:var(--ink)}
+.p-name{display:flex;flex-direction:column;line-height:1.3;font-size:13px}
+.p-name small{color:#8c8c87;font-size:11px}
+.p-lv{display:flex;gap:10px;margin-left:auto;font-size:10px;color:#8c8c87}
+.p-b{display:block;height:6px;background:#3a3a38;margin-top:4px;width:46px}
+.p-b i{display:block;height:6px;background:var(--acc);width:var(--v)}
+.on .p-isl{animation-name:pIsl}.on .p-pods{animation-name:pPods}.on .p-b i{animation-name:pFill}
+@keyframes pIsl{0%{width:150px;height:28px}14%,100%{width:min(400px,86%);height:64px}}
+@keyframes pPods{0%,10%{transform:scale(.3) rotate(-30deg);opacity:0}24%{transform:scale(1.15) rotate(6deg);opacity:1}32%,100%{transform:none;opacity:1}}
+@keyframes pFill{0%,26%{width:0}52%,100%{width:var(--v)}}
+
+/* 05 fill light */
+.d-scr{position:absolute;inset:0;background:#191919}
+.d-face{position:absolute;left:50%;bottom:-6%;width:34%;aspect-ratio:1;transform:translateX(-50%);background:#0d0d0d;clip-path:polygon(30% 0,70% 0,82% 30%,78% 70%,50% 100%,22% 70%,18% 30%)}
+.d-isl{width:150px;height:28px}
+.d-isl svg{width:60px;height:26px;fill:var(--acc)}
+.d-t{position:absolute;top:34%;left:0;right:0;text-align:center;font-size:12px;font-weight:700;color:#6b6b66;opacity:0}
+.on .d-scr{animation-name:dScr}.on .d-face{animation-name:dFace}.on .d-isl{animation-name:dIsl}.on .d-t{animation-name:dT}
+@keyframes dScr{0%,22%{background:#070707}30%,58%{background:#f1f0ec}70%,100%{background:#191919}}
+@keyframes dFace{0%,22%{background:#0d0d0d}30%,58%{background:#c9c8c2}70%,100%{background:#0d0d0d}}
+@keyframes dIsl{0%,20%{width:150px;height:28px}30%,62%{width:min(260px,60%);height:36%}72%,100%{width:150px;height:28px}}
+@keyframes dT{0%,20%{opacity:1;color:#6b6b66}24%,100%{opacity:0}}
+
+/* 06 presence */
+.r-ring{position:absolute;bottom:-30px;width:60px;height:60px;border:2px solid var(--acc);border-radius:50%;opacity:0}
+.on .r-ring{animation:ring 2s cubic-bezier(.2,.6,.3,1) infinite}
+.r-ring.l{left:-30px}.r-ring.r{right:-30px}
+.r-ring:nth-of-type(3n+2){animation-delay:.66s}.r-ring:nth-of-type(3n){animation-delay:1.33s}
+@keyframes ring{0%{transform:scale(.3);opacity:.9}100%{transform:scale(6);opacity:0}}
+.r-me{position:absolute;bottom:0;left:38%;width:24%;height:62%;background:#0b0b0b;clip-path:polygon(35% 0,65% 0,72% 30%,62% 44%,100% 60%,100% 100%,0 100%,0 60%,38% 44%,28% 30%)}
+.r-isl{width:150px;height:28px}
+.r-t{opacity:0;font-size:12px;font-weight:700}
+.on .r-me{animation-name:rMe}.on .r-isl{animation-name:rIsl}.on .r-t{animation-name:rT}
+@keyframes rMe{0%,10%{transform:translateX(-260%)}40%,100%{transform:none}}
+@keyframes rIsl{0%,42%{width:150px;height:28px}52%,74%{width:min(240px,56%);height:44px}84%,100%{width:150px;height:28px}}
+@keyframes rT{0%,50%{opacity:0}56%,74%{opacity:1}80%,100%{opacity:0}}
+
+/* 07 desk browser */
+.b-w1{left:8%;top:18%;width:46%;height:50%}
+.b-w2{left:40%;top:34%;width:50%;height:52%}
+.b-addr{position:absolute;left:18%;right:18%;top:26px;height:22px;background:#3a3a38;display:flex;align-items:center;padding:0 10px;font-size:10px;font-weight:600;color:#c9c8c2;opacity:0}
+.b-pg{position:absolute;left:18%;right:18%;top:60px;bottom:10%;display:grid;grid-template-columns:2fr 1fr;gap:8px;opacity:0}
+.b-pg i{display:block;background:#2d2d2b}
+.b-isl{width:150px;height:28px}
+.on .b-w1{animation-name:bW1}.on .b-w2{animation-name:bW2}.on .b-addr{animation-name:bAddr}.on .b-pg{animation-name:bPg}
+@keyframes bW1{0%,24%{transform:none}40%,100%{transform:translate(-120%,-10%)}}
+@keyframes bW2{0%,24%{transform:none}40%,100%{transform:translate(120%,10%)}}
+@keyframes bAddr{0%,42%{opacity:0;transform:translateY(-30px)}52%,100%{opacity:1;transform:none}}
+@keyframes bPg{0%,52%{opacity:0;transform:translateY(12px)}64%,100%{opacity:1;transform:none}}
+
+/* end states for off slides */
+.slide:not(.on) .b-w1{transform:translate(-120%,-10%)}.slide:not(.on) .b-w2{transform:translate(120%,10%)}
+.slide:not(.on) .b-addr,.slide:not(.on) .b-pg,.slide:not(.on) .m-b{opacity:1}
+
+/* privacy */
+.priv{display:flex;flex-wrap:wrap;gap:40px 64px}
+.priv h2{flex:1 1 340px;line-height:1}
+.priv-grid{flex:1.3 1 440px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 32px}
+.priv-grid div{border-top:1px solid #4a4a47;padding:18px 0 26px}
+.priv-grid b{font-size:17px}
+.priv-grid p,details p{margin:8px 0 0;font-size:15px;line-height:1.6;color:#b5b5b0}
+
+/* buy */
+.buy{background:#151515;box-shadow:inset 0 0 0 1px #343432;color:var(--ink);padding:clamp(28px,5vw,64px);display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:32px}
+.buy .lbl{color:#8c8c87}
+.price{font-size:clamp(88px,12vw,168px);font-weight:900;letter-spacing:-.07em;line-height:.85;margin-top:16px;font-variant-numeric:tabular-nums}
+.buy-r{flex:0 1 400px}
+.buy-r p{margin:0;font-size:16px;line-height:1.6;color:#b5b5b0}
+.buy-r .btn{width:100%;margin:22px 0 12px;background:var(--ink);color:#1c1c1c}
+.buy-r .btn:hover{background:var(--acc);color:#1c1c1c}
+
+/* faq */
+#faq h2{margin-bottom:24px;font-size:clamp(32px,3.6vw,48px);letter-spacing:-.04em}
+details{border-top:1px solid #4a4a47}
+details:last-of-type{border-bottom:1px solid #4a4a47}
+details p{margin:0 0 18px}
+summary{cursor:pointer;list-style:none;padding:18px 0;min-height:44px;font-weight:700;font-size:17px;display:flex;justify-content:space-between;gap:16px}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+";font-weight:500;font-size:22px;line-height:1}
+details[open] summary::after{content:"\2212"}
+
+/* footer: closing line, four plain columns, then the wordmark bleeding off the page */
+.foot{position:relative;margin-top:clamp(120px,15vw,200px);padding-bottom:clamp(64px,9vw,128px);overflow:hidden}
+.foot{height:509px}
+/* layers, back to front: the mark, the blur, then the text, so the blur softens the mark but never the copy */
+.foot-sink{z-index:0}
+.foot-top,.foot-cols{position:relative;z-index:2}
+.foot-top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:24px;padding-top:clamp(48px,6vw,80px)}
+/* credit sits a level below the section headings: it signs the page, it doesn't sell */
+.btn.line{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px #5a5a56}
+.btn.line:hover{background:transparent;box-shadow:inset 0 0 0 1px var(--ink)}
+.foot-cols{display:grid;grid-template-columns:minmax(0,1.8fr) repeat(3,minmax(0,1fr));gap:32px;margin-top:clamp(56px,7vw,96px)}
+.foot-cols .lbl{margin-bottom:14px}
+.foot-cols a{display:block;width:max-content;padding:5px 0;font-size:15px;font-weight:600;text-decoration:none;color:#cfcfca}
+.foot-cols a:hover{color:var(--ink)}
+.foot-cols p{margin:0;font-size:15px;line-height:1.65;color:#a8a8a2}
+/* footer head: the app icon, its name, who makes it; under it a line and the way to get it, the links pushed right */
+.foot-app{display:flex;align-items:center;gap:20px}
+/* the app icon drawn the macOS way: a squircle (superellipse) with a soft top-lit gradient, a sheen, a rim of light, and a lifted shadow */
+.foot-icon{display:block;flex:none;width:64px;height:64px;filter:drop-shadow(0 6px 10px rgba(0,0,0,.45)) drop-shadow(0 1px 1.5px rgba(0,0,0,.5))}
+.foot-icon svg{display:block;width:100%;height:100%;overflow:visible}
+.foot-icon .fi-mark{fill:var(--acc)}
+/* one line in one face and size, the maker only in a softer colour */
+.foot-name{margin:0;font-size:clamp(28px,3vw,40px);font-weight:750;letter-spacing:-.035em;line-height:1.1}
+.foot-name b{font-weight:inherit}
+.foot-name span{color:#a8a8a2}
+.foot-pitch p{max-width:34ch;font-size:17px;line-height:1.6;color:#a8a8a2}
+.foot-cols .foot-get{display:inline-flex;align-items:center;gap:6px;margin-top:28px;padding:16px 26px;border-radius:16px;background:var(--ink);color:#1c1c1c!important;font-size:16px;font-weight:700;text-decoration:none;width:auto!important;transition:transform .16s,background .2s}
+.foot-cols .foot-get:hover{background:#fff}
+.foot-cols .foot-get:active{transform:scale(.97)}
+/* the footer mark runs edge to edge behind the footer content, its lower part sunk below the page end */
+.foot-sink{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+/* the mark as a grid of 0/1 characters; common.js fills it. Capped and sunk the same way the drawing was */
+.foot-bits{position:absolute;inset:0;margin:0;overflow:hidden;font:500 clamp(9px,.95vw,13px)/1 ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#5a5a56;white-space:pre;user-select:none}
+/* progressive blur along the bottom of the footer only: stacked backdrop blurs, each masked lower down */
+.edge-blur{position:absolute;left:0;right:0;top:150px;height:487px;pointer-events:none;z-index:1} /* starts above the link columns so they sit on blurred bits */
+.edge-blur i{position:absolute;inset:0}
+.edge-blur i:nth-child(1){backdrop-filter:blur(1px);-webkit-backdrop-filter:blur(1px);mask:linear-gradient(transparent 0%,#000 20%,#000 40%,transparent 60%)}
+.edge-blur i:nth-child(2){backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);mask:linear-gradient(transparent 20%,#000 40%,#000 60%,transparent 80%)}
+.edge-blur i:nth-child(3){backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);mask:linear-gradient(transparent 40%,#000 60%,#000 80%,transparent 100%)}
+.edge-blur i:nth-child(4){backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);mask:linear-gradient(transparent 60%,#000 80%)}
+.edge-blur i:nth-child(5){backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);mask:linear-gradient(transparent 80%,#000 100%)}
+.edge-blur::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 30%,rgba(38,38,38,.6))}
+
+/* ---------- inner pages (contact, products, policy, account, about, teams, help) ---------- */
+.pg{padding-top:clamp(64px,9vw,128px)}
+
+.pg h1{margin-top:18px;max-width:16ch;font-size:clamp(44px,7vw,96px);line-height:.95;letter-spacing:-.055em}
+.pg h1 em{font-style:normal;color:#9a9a95}
+
+/* label / content rows */
+.rows{margin-top:24px;border-top:1px solid #4a4a47}
+
+.tag{display:inline-block;padding:3px 8px;border:1px solid #5a5a56;font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:#a8a8a2;white-space:nowrap}
+.tag.live{border-color:var(--acc);color:var(--acc)}
+/* numbered steps */
+/* three-up cards (team) */
+
+/* products: feature anatomy. Tier 1 = numbered section (h2), tier 2 = feature (h3 + promise + scene), tier 3 = facts */
+
+/* the landing page's feature scenes, reused outside the carousel */
+.scene .scr{flex:none;width:100%;margin:0;align-self:auto;border-bottom-width:10px;border-radius:14px}
+.scene:not(.on) .b-w1{transform:translate(-120%,-10%)}.scene:not(.on) .b-w2{transform:translate(120%,10%)}
+.scene:not(.on) .b-addr,.scene:not(.on) .b-pg,.scene:not(.on) .m-b{opacity:1}
+
+/* shared item anatomy: the key sentence in ink, the detail in grey */
+
+.sbtn.pri{background:var(--ink);color:#1c1c1c;box-shadow:none}
+.sbtn.pri:hover{background:var(--acc);box-shadow:none}
+
+/* ---------- detail pages, second pass: each page gets the structure its job needs ---------- */
+/* sticky index beside the content (products, help, policy); it marks where you are */
+
+.rail{position:sticky;top:96px;display:flex;flex-direction:column;gap:2px;font-size:14px}
+.rail .lbl{margin:18px 0 8px}
+.rail .lbl:first-child{margin-top:0}
+.rail a{display:flex;align-items:center;min-height:36px;padding:0 12px;border-left:1px solid #4a4a47;text-decoration:none;font-weight:600;color:#a8a8a2}
+.rail a:hover{color:var(--ink)}
+.rail a[aria-current]{border-left:2px solid var(--acc);padding-left:11px;color:var(--ink)}
+
+/* products: one chapter per feature = heading + promise, a stage with the live scene, then fact cells */
+
+.stage{margin-top:28px;padding:clamp(16px,3vw,40px) clamp(16px,3vw,40px) 0;background:#0e0e0e}
+.stage .scene{max-width:760px;margin:0 auto}
+.stage .scene .scr{border-bottom-width:0;border-radius:14px 14px 0 0}
+
+/* help: a checklist you can tick, task cards, and fixes that open */
+
+details p.key{margin-bottom:8px;font-size:17px;line-height:1.55;color:var(--ink)}
+
+/* policy: plain-language summary first, then numbered clauses at a reading width */
+
+.open{margin-top:16px;padding:20px 22px;box-shadow:inset 0 0 0 1px #5a5a56}
+.open ul{margin:10px 0 0;padding-left:18px;font-size:15px;line-height:1.8;color:#cfcfca}
+
+/* about: one chapter per question; the question word stays put while its answer scrolls */
+
+/* teams: the structure as a diagram you can point at, and the work loop as lanes */
+/* account: an app-style settings screen, tabs on the left */
+
+/* contact: pick a topic, and the message brief fills itself in */
+
+.copy{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;min-height:44px;font-size:15px;font-weight:500;color:#b5b5b0;text-decoration:underline;text-underline-offset:5px}
+.copy:hover{color:#fff}
+.copy:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+/* still-to-decide marks and notices: honest about what isn't settled */
+/* placeholders read like Notion's inline code: a quiet tinted chip in a mono face */
+.ph{padding:2px 5px;border-radius:4px;background:rgba(135,131,120,.2);color:#ff7369;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85em}
+/* notes are Notion callouts: an emoji, a soft grey block, no border */
+.note{display:flex;gap:12px;align-items:flex-start;margin-top:28px;padding:16px 16px 16px 14px;border-radius:4px;background:rgba(255,255,255,.055);font-size:15px;line-height:1.6;color:#d4d4d0}
+.note-ic{flex:none;font-size:18px;line-height:1.4}
+.note b{font-weight:650;color:var(--ink)}
+/* account panels */
+
+.sbtn{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;min-height:44px;padding:0 16px;font-size:14px;font-weight:650;color:var(--ink);box-shadow:inset 0 0 0 1px #5a5a56}
+.sbtn:hover{box-shadow:inset 0 0 0 1px var(--ink)}
+.sbtn.danger{color:#ff8f7a;box-shadow:inset 0 0 0 1px #7a3a30}
+.sbtn.danger:hover{box-shadow:inset 0 0 0 1px #ff8f7a}
+/* the "not connected yet" notice floats at the bottom of the screen, so it shows wherever the button was */
+.say{position:fixed;left:50%;bottom:20px;z-index:30;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);margin:0;padding:12px 16px;background:#0e0e0e;box-shadow:inset 0 0 0 1px var(--acc);font-size:14px;line-height:1.5;color:var(--ink)}
+.say:empty{display:none}
+/* contact band, after the G.gear service team site: centred, light type, pill buttons */
+
+@media (max-width:900px){.rail{position:static;flex-direction:row;gap:8px;overflow-x:auto;padding-bottom:6px}.rail .lbl{display:none}.rail a{flex:none;min-height:44px;padding:0 14px;border:0;box-shadow:inset 0 0 0 1px #4a4a47;white-space:nowrap}.rail a[aria-current]{border:0;padding-left:14px;box-shadow:inset 0 0 0 1px var(--acc)}}
+@media (max-width:760px){.foot{height:auto}.edge-blur{top:auto;bottom:0;height:70%}.foot-cols{grid-template-columns:1fr 1fr}.track{--step:94%;--lead:4%}.slide{flex-basis:92%}.hide-sm{display:none!important}.scr{flex-basis:100%}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
+
+/* teams, after studyhall.design: a statement, a work grid, who we are, a plain list, then contact */
+.tm{padding-bottom:clamp(96px,12vw,180px)}
+.tm .wrap{max-width:calc(var(--col) + 2 * var(--gut));padding-inline:var(--gut);margin-inline:auto}
+.tm-say{margin:0;font-size:clamp(40px,6.4vw,84px);font-weight:500;letter-spacing:-.045em;line-height:1.02;color:var(--fg)}
+.tm-say span{color:var(--soft)}
+.tm-lbl{margin:0 0 24px;font-size:13px;font-weight:600;color:var(--soft)}
+.tm-hero{padding-top:clamp(72px,10vw,140px)}
+.tm-hero .tm-say{max-width:16ch}
+.tm .tm-work{margin-top:clamp(96px,12vw,180px)}
+.tm-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:0;padding:0;list-style:none}
+.tm-card{display:flex;flex-direction:column;min-height:clamp(200px,22vw,280px);padding:clamp(20px,2.4vw,32px);background:#1c1c1c;text-decoration:none;transition:background .25s}
+a.tm-card:hover{background:#2e2e2c}
+.tm-card h3{margin:auto 0 0;font-size:clamp(26px,2.8vw,38px);font-weight:500;letter-spacing:-.04em;line-height:1}
+.tm-card p{margin:10px 0 0;font-size:15px;line-height:1.55;color:var(--soft)}
+.tm-st{font-size:13px;color:var(--soft)}
+.tm .tm-we{margin-top:clamp(120px,15vw,220px)}
+.tm-rot{display:inline-block;color:var(--fg)!important;transition:opacity .3s,filter .3s,translate .3s}
+.tm-rot.is-out{opacity:0;filter:blur(8px);translate:0 .15em}
+.tm .tm-log{margin-top:clamp(120px,15vw,220px)}
+.tm-rows{margin:0;padding:0;list-style:none;border-top:1px solid var(--fg)}
+.tm-rows li{display:flex;justify-content:space-between;gap:24px;padding:22px 0;border-bottom:1px solid var(--line);font-size:clamp(18px,1.8vw,22px);letter-spacing:-.02em}
+.tm-rows li span+span{font-size:14px;color:var(--soft);letter-spacing:0}
+@media (max-width:760px){.tm-grid{grid-template-columns:1fr}}
+/* about, after ouiwill.com/about: pinned value words among floating pieces, then one claim, a picture, lists, a closing line */
+.ab{padding-bottom:clamp(96px,12vw,180px)}
+.ab .wrap{max-width:calc(var(--col) + 2 * var(--gut));padding-inline:var(--gut);margin-inline:auto}
+.ab-lbl{margin:0 0 28px;font-size:13px;font-weight:600;color:var(--soft)}
+.ab-values{height:300svh}
+.ab-stick{position:sticky;top:0;height:100svh;overflow:hidden;display:grid;place-items:start center;padding-top:22svh}
+.ab-word{position:relative;z-index:3;margin:0;display:grid;font-size:clamp(64px,12vw,184px);font-weight:500;letter-spacing:-.05em;line-height:1;color:var(--fg)}
+.ab-word span{grid-area:1/1;text-align:center;opacity:0;filter:blur(12px);scale:.96;transition:opacity .5s,filter .5s,scale .5s}
+.ab-word span.on{opacity:1;filter:none;scale:1}
+.ab-tile{position:absolute;display:flex;flex-direction:column;gap:6px;padding:16px 18px;background:#1c1c1c;box-shadow:inset 0 0 0 1px #3a3a38;font-size:14px;color:var(--soft);will-change:transform}
+.ab-tile b{font-size:17px;font-weight:600;color:var(--fg)}
+.ab-tile.t1{left:8%;top:16%}.ab-tile.t2{right:10%;top:12%}.ab-tile.t3{left:14%;bottom:18%}
+.ab-tile.t4{right:16%;bottom:22%}.ab-tile.t5{left:40%;top:6%}.ab-tile.t6{right:36%;bottom:8%}
+.ab-pill{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#000;border-radius:999px;color:var(--fg);font-size:14px}
+.ab-pill svg{width:22px;height:10px;fill:var(--fg)}
+.ab-bars{display:flex;align-items:flex-end;gap:3px;height:16px}
+.ab-bars i{width:3px;background:var(--fg);animation:ab-bar 1s ease-in-out infinite alternate}
+.ab-bars i:nth-child(2){animation-delay:-.3s}.ab-bars i:nth-child(3){animation-delay:-.6s}.ab-bars i:nth-child(4){animation-delay:-.15s}
+@keyframes ab-bar{from{height:3px}to{height:16px}}
+/* the claim sits in the held screen, over a band that blurs and then fills to the ground: the floating pieces slide under it
+   instead of being cut off at the screen's edge */
+.ab-fade{position:absolute;left:0;right:0;bottom:0;z-index:2;height:52%;display:flex;align-items:flex-end;padding-bottom:clamp(40px,7svh,80px)}
+.ab-fade::before{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(rgba(38,38,38,0),var(--bg) 78%);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);-webkit-mask-image:linear-gradient(transparent,#000 38%);mask-image:linear-gradient(transparent,#000 38%)}
+.ab-fade .wrap{width:100%}
+.ab-claim{margin:0;max-width:20ch;font-size:clamp(32px,4.6vw,64px);font-weight:500;letter-spacing:-.045em;line-height:1.05;color:var(--fg)}
+.ab .ab-pic{margin-top:clamp(80px,10vw,140px)}
+.ab .ab-does,.ab .ab-hold,.ab .ab-who,.ab .ab-where,.ab .ab-end{margin-top:clamp(120px,15vw,220px)}
+.ab-list{margin:0;padding:0;list-style:none;border-top:1px solid var(--fg)}
+.ab-list li{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 32px;align-items:baseline;padding:22px 0;border-bottom:1px solid var(--line)}
+.ab-list h3{margin:0;font-size:clamp(22px,2.2vw,30px);font-weight:500;letter-spacing:-.03em}
+.ab-list p{margin:0;font-size:16px;line-height:1.55;color:var(--soft)}
+.ab-marq{margin-top:clamp(80px,10vw,140px);overflow:hidden;border-block:1px solid var(--line);padding:18px 0}
+.ab-marq div{display:flex;width:max-content;animation:ab-marq 30s linear infinite}
+.ab-marq span{padding-right:.6em;font-size:clamp(28px,3.4vw,48px);font-weight:500;letter-spacing:-.04em;white-space:nowrap;color:var(--soft)}
+@keyframes ab-marq{to{translate:-50% 0}}
+.ab-hold{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px 24px}
+.ab-hold .ab-lbl{grid-column:1/-1;margin:0}
+.ab-group{padding-top:20px;border-top:1px solid var(--fg)}
+.ab-group h3{margin:0;font-size:clamp(28px,3vw,40px);font-weight:500;letter-spacing:-.04em}
+.ab-group ul{margin:18px 0 0;padding:0;list-style:none}
+.ab-group li{font-size:16px;line-height:1.9;color:var(--soft)}
+.ab-group a{color:var(--fg);text-underline-offset:4px}
+.ab-big{margin:0;max-width:18ch;font-size:clamp(36px,5vw,68px);font-weight:500;letter-spacing:-.045em;line-height:1.05;color:var(--fg)}
+.ab-link{display:inline-block;margin-top:28px;font-size:17px;font-weight:600;text-decoration:none;border-bottom:1px solid currentColor}
+.ab-city{margin:0;font-size:clamp(96px,20vw,300px);font-weight:500;letter-spacing:-.06em;line-height:.9;color:var(--fg)}
+.ab-acts{display:flex;flex-wrap:wrap;gap:12px;margin-top:36px}
+@media (max-width:760px){.ab-list li,.ab-hold{grid-template-columns:1fr}.ab-tile.t5,.ab-tile.t6{display:none}.ab-tile{font-size:12px;padding:12px 14px}.ab-tile b{font-size:14px}}
+@media (prefers-reduced-motion:reduce){.ab-marq div,.ab-bars i{animation:none}.ab-bars i{height:10px}}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap} /* read aloud, not shown */
+.tm .tm-contact{margin-top:clamp(120px,15vw,220px)}
+.tm-mail{display:inline-block;margin-top:28px;font-size:clamp(20px,2.4vw,32px);font-weight:500;letter-spacing:-.02em;text-decoration:none;border-bottom:1px solid currentColor}
+.tm-acts{display:flex;flex-wrap:wrap;gap:12px;margin-top:32px}
+/* grain over every page, coarse: one fixed layer of SVG noise, blended in so it shows on the dark ground and the light panels alike */
+body::after{content:"";position:fixed;inset:0;z-index:2147483647;pointer-events:none;opacity:.21;mix-blend-mode:overlay;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='2.2' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='2.4' intercept='-.7'/%3E%3CfeFuncG type='linear' slope='2.4' intercept='-.7'/%3E%3CfeFuncB type='linear' slope='2.4' intercept='-.7'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+@media (max-width:760px){.foot-pitch{grid-column:1/-1}}
+/* products, after thewayapp.com: a statement, why one, the path of features, three lines, a way in */
+.pd h1{margin:0;max-width:14ch;font-size:clamp(48px,7.4vw,104px);font-weight:600;letter-spacing:-.05em;line-height:.98}
+.pd h2{margin:0;max-width:18ch;font-size:clamp(36px,4.6vw,64px);font-weight:600;letter-spacing:-.045em;line-height:1.02}
+.pd-hero{padding-top:clamp(64px,9vw,128px)}
+.pd-sub{margin:24px 0 0;font-size:clamp(18px,1.6vw,22px);line-height:1.5;color:#b5b5b0}
+.pd-cta{display:flex;flex-wrap:wrap;align-items:center;gap:12px 24px;margin-top:36px}
+.pd-cta>a:not(.btn){font-weight:650;text-underline-offset:5px}
+.pd-one,.pd-path,.pd-three,.pd-end{margin-top:clamp(120px,15vw,220px)}
+.pd-one p{margin:24px 0 0;max-width:46ch;font-size:clamp(18px,1.6vw,22px);line-height:1.55;color:#b5b5b0}
+.pd-steps{margin:48px 0 0;padding:0;list-style:none}
+.pd-step{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:24px 48px;align-items:center;padding:48px 0;border-top:1px solid #4a4a47;scroll-margin-top:96px}
+.pd-step:last-child{border-bottom:1px solid #4a4a47}
+.pd-step h3{margin:0;font-size:clamp(28px,3vw,40px);font-weight:600;letter-spacing:-.04em;line-height:1.05}
+.pd-step p{margin:12px 0 0;max-width:30ch;font-size:17px;line-height:1.55;color:#b5b5b0}
+.pd-step .stage{margin-top:0}
+.pd-three p{margin:0;font-size:clamp(48px,8vw,120px);font-weight:600;letter-spacing:-.05em;line-height:1}
+.pd-req{margin:20px 0 0;font-size:14px;color:#8c8c87}
+@media (max-width:760px){.pd-step{grid-template-columns:1fr}}
+/* help, after burgundy.studio/faq: a title, groups of questions on the left-hand label, then who to ask */
+.hp-head{padding-top:clamp(64px,9vw,128px)}
+.hp-head h1{margin:0;font-size:clamp(48px,7.4vw,104px);font-weight:600;letter-spacing:-.05em;line-height:.98}
+.hp-head p{margin:20px 0 0;font-size:clamp(18px,1.6vw,22px);color:#b5b5b0}
+.hp-body{margin-top:clamp(72px,9vw,128px)}
+.hp-group{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:16px 48px;padding:40px 0;border-top:1px solid #4a4a47;scroll-margin-top:96px}
+.hp-group h2{margin:0;font-size:clamp(22px,2.2vw,28px);font-weight:600;letter-spacing:-.03em}
+.hp-list details:first-child{border-top:0}
+.hp-a{padding-bottom:20px}
+.hp-a p{margin:0 0 10px;max-width:60ch;font-size:16px;line-height:1.7;color:#b5b5b0}
+.hp-end{margin-top:clamp(120px,15vw,200px);text-align:left}
+.hp-end h2{margin:0 0 28px;font-size:clamp(36px,4.6vw,64px);font-weight:600;letter-spacing:-.045em}
+@media (max-width:760px){.hp-group{grid-template-columns:1fr}}
+/* contact: one address, as big as the screen allows; then the topics, each a ready-made email */
+.ct-hero{padding-top:clamp(72px,10vw,140px)}
+.ct-lbl{margin:0 0 20px;font-size:15px;font-weight:600;color:#8c8c87}
+.ct-mail{display:flex;flex-wrap:wrap;font-size:clamp(44px,8.6vw,124px);font-weight:600;letter-spacing:-.055em;line-height:.98;text-decoration:none;color:var(--ink);transition:color .2s}
+.ct-mail:hover{color:var(--acc)}
+.ct-topics{margin-top:clamp(120px,15vw,200px)}
+.ct-topics ul{margin:0;padding:0;list-style:none;border-top:1px solid var(--ink)}
+.ct-topics li a{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto;gap:6px 32px;align-items:baseline;padding:26px 0;border-bottom:1px solid #4a4a47;text-decoration:none;transition:padding .25s}
+.ct-topics li a:hover{padding-left:12px}
+.ct-topics li b{font-size:clamp(22px,2.4vw,32px);font-weight:600;letter-spacing:-.035em}
+.ct-topics li span{font-size:15px;line-height:1.5;color:#a8a8a2}
+.ct-topics li i{font-style:normal;font-size:22px;color:#8c8c87;transition:color .2s,translate .25s}
+.ct-topics li a:hover i{color:var(--acc);translate:4px 0}
+@media (max-width:760px){.ct-topics li a{grid-template-columns:1fr auto}.ct-topics li span{grid-column:1}.ct-topics li i{grid-row:1;grid-column:2}}
+/* policy and account, after Superlist’s privacy page: a title, a quiet date line, plain headed text in one readable column */
+.pl-doc{padding-top:clamp(64px,9vw,128px)}
+.pl-doc>*{max-width:760px} /* left edge on the bar’s grid, a reading measure for the text */
+.pl-doc h1{margin:0;font-size:clamp(48px,7.4vw,96px);font-weight:600;letter-spacing:-.05em;line-height:.98}
+.pl-date{margin:16px 0 0;font-size:15px;color:#8c8c87}
+.pl-doc section{margin-top:clamp(56px,7vw,88px)}
+.pl-doc h2{margin:0 0 8px;font-size:clamp(28px,3vw,40px);font-weight:600;letter-spacing:-.04em;line-height:1.1}
+.pl-doc h3{margin:32px 0 8px;font-size:19px;font-weight:650;letter-spacing:-.01em}
+.pl-doc section>p{margin:0 0 12px;font-size:16px;line-height:1.75;color:#b5b5b0}
+.pl-doc section>p a{color:var(--ink)}
+.ac-dl{display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px 24px;margin:20px 0 0;font-size:16px}
+.ac-dl dt{color:#8c8c87}.ac-dl dd{margin:0}
+.ac-rows{margin:16px 0;padding:0;list-style:none;border-top:1px solid #4a4a47}
+.ac-rows li{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid #4a4a47;font-size:16px}
+.ac .acts{margin-top:20px}
+.pd-pts{margin:20px 0 0;padding:0;list-style:none;border-top:1px solid #4a4a47}
+.pd-pts li{padding:12px 0;border-bottom:1px solid #4a4a47;font-size:15px;line-height:1.5;color:#cfcfca}
+/* products, what it does: one screen the page is held on, one step per scroll gesture (common.js). The next step comes up out of a blur into the
+   current one's place on a spring; the one before blurs and flies up. No JS: the steps simply stack. */
+.pd-pin.is-live{height:100svh}
+.pd-pin.is-live .pd-stick{height:100svh;display:grid;align-content:center}
+.pd-pin.is-live .pd-steps{display:grid;margin-top:0}
+.pd-pin.is-live .pd-step{grid-area:1/1;border:0}
+.pd-pin.is-live .pd-step[data-state=before]{opacity:0;transform:translateY(96px) scale(.97);filter:blur(18px);pointer-events:none}
+.pd-pin.is-live .pd-step[data-state=after]{opacity:0;transform:translateY(-120px) scale(.97);filter:blur(18px);pointer-events:none;transition:opacity .45s ease-in,transform .55s cubic-bezier(.55,0,.75,.2),filter .45s ease-in}
+.pd-pin.is-live .pd-step[data-state=current]{opacity:1;transform:none;filter:none;transition:opacity .5s ease-out .08s,filter .6s ease-out .08s,transform 1s cubic-bezier(.2,1.25,.35,1) .08s;transition-timing-function:ease-out,ease-out,linear(0, .042, .145, .277, .418, .554, .675, .778, .861, .925, .971, 1.003, 1.023, 1.034, 1.038, 1.038, 1.035, 1.03, 1.025, 1.019, 1.014, 1.01, 1.007, 1.004, 1.002, 1, .999, 1)}
+.pd-pin.is-live .pd-step[data-state=before]{transition:opacity .45s,transform .55s,filter .45s}
+@media (prefers-reduced-motion:reduce){.pd-pin.is-live .pd-step{transform:none!important;filter:none!important}}
+/* brand orange marks the moment Andeville answers you: here, the step on screen */
+.pd-step h3::before{content:"";display:inline-block;width:10px;height:10px;margin:0 14px .18em 0;border-radius:50%;background:var(--acc);vertical-align:middle;opacity:0;scale:.4;transition:opacity .3s .35s,scale .5s cubic-bezier(.2,1.6,.4,1) .35s}
+.pd-pin:not(.is-live) .pd-step h3::before,.pd-step[data-state=current] h3::before{opacity:1;scale:1}
+/* text selection in the brand colour: orange fill, ink text */
+::selection{background:var(--acc);color:#151515}
+/* home only: a short progressive blur at the left and right edges, the same build as the top one (layers of rising blur, each
+   masked to a band), so content passing the sides softens instead of cutting off */
+.side-blur{position:fixed;top:0;bottom:0;z-index:19;width:40px;pointer-events:none;display:grid}
+.side-blur i{grid-area:1/1;-webkit-mask:linear-gradient(var(--dir),#000 var(--m0),transparent var(--m1));mask:linear-gradient(var(--dir),#000 var(--m0),transparent var(--m1))}
+.side-blur.lft{left:0;--dir:to right}.side-blur.rgt{right:0;--dir:to left}
+.side-blur i:nth-child(1){-webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px);--m0:40%;--m1:100%}
+.side-blur i:nth-child(2){-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);--m0:30%;--m1:80%}
+.side-blur i:nth-child(3){-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);--m0:20%;--m1:60%}
+.side-blur i:nth-child(4){-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);--m0:10%;--m1:40%}
+.side-blur i:nth-child(5){-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);--m0:0%;--m1:20%}
+@media (pointer:coarse) and (display-mode:browser){.side-blur{display:none}}
+/* hero: "And..." then "eville." comes in from the right, slowly, then is pulled the last bit and snaps on like a magnet */
+.andev b,.andev i,.andev u{font:inherit;text-decoration:none;display:inline-block}
+.andev u{display:none}
+.andev.snapped i{display:none}
+.andev.snapped u{display:inline-block;animation:andev-snap 1.2s both}
+@keyframes andev-snap{
+  0%{transform:translateX(.9em);opacity:0;filter:blur(10px);animation-timing-function:cubic-bezier(.3,0,.6,.4)}
+  55%{transform:translateX(.42em);opacity:1;filter:blur(1px);animation-timing-function:cubic-bezier(.7,0,1,.6)}
+  78%{transform:translateX(-.05em);filter:none;animation-timing-function:ease-out}
+  89%{transform:translateX(.02em)}
+  100%{transform:none;opacity:1;filter:none}}
+@media (prefers-reduced-motion:reduce){.andev.snapped u{animation:none}}
+/* hero: "Andeville." ends highlighted like selected text, the orange sweeping in from the left */
+.sl>span.andev{background:linear-gradient(var(--acc),var(--acc)) no-repeat left/0% 100%;transition:opacity .8s ease,filter 1s ease,background-size .55s cubic-bezier(.65,0,.35,1),color .3s ease .2s}
+.sl>span.andev.lit{background-size:100% 100%;color:#151515}
+@media (prefers-reduced-motion:reduce){.sl>span.andev{transition:none}}
+.ac [hidden]{display:none!important}
+.ac-dl dd input{width:100%;max-width:320px;min-height:44px;box-sizing:border-box;padding:0 12px;font:inherit;color:var(--ink);background:#1c1c1c;border:0;box-shadow:inset 0 0 0 1px #5a5a56}
+.ac #ac-dev{margin-top:32px}
+
+/* Languages. The Worker (api/pages.js) sets <html lang> and fills the footer menu; it stays hidden when a page is
+   served without it. The menu takes the small button's look (.sbtn). */
+.foot-lang{appearance:none;-webkit-appearance:none;min-height:44px;margin:0;padding:0 38px 0 16px;border:0;border-radius:0;background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23cfcfca' stroke-width='1.6'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 16px center;box-shadow:inset 0 0 0 1px #5a5a56;color:var(--ink);font:inherit;font-size:14px;font-weight:650;cursor:pointer}
+.foot-lang:hover{box-shadow:inset 0 0 0 1px var(--ink)}
+.foot-lang:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
+/* Teams, "We are [word] and more.": the two fixed pieces keep the heading's own colour (other spans in it are soft), and
+   the space before the changing word is drawn here so Japanese and Chinese, which set none, can drop it. */
+.tm-say .tm-we-a,.tm-say .tm-we-b{color:inherit}
+.tm-say .tm-we-a::after{content:" "}
+:lang(ja) .tm-say .tm-we-a::after,:lang(zh) .tm-say .tm-we-a::after{content:none}
+.pl-note:empty{display:none}
+.pl-note{margin:8px 0 0;font-size:15px;color:#8c8c87}
+/* Pretendard has Latin, Cyrillic, Hangul and kana, but no Han, Arabic or Hebrew letters. Japanese and Chinese would mix
+   its kana and Latin punctuation with the system's Han, so there it is kept to Latin letters, digits and arrows and
+   the system's own typeface sets the rest. */
+@font-face{font-family:"Pretendard Latin";src:url("fonts/PretendardVariable.woff2") format("woff2");font-weight:45 920;font-display:swap;unicode-range:U+0020-024F,U+2190-21FF,U+2318}
+:root:lang(ja) body{font-family:"Pretendard Latin","Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif}
+:root:lang(zh-Hans) body{font-family:"Pretendard Latin","PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+:root:lang(zh-Hant) body{font-family:"Pretendard Latin","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+
+/* ---------- Right to left (Arabic, Hebrew): the Worker puts dir="rtl" on <html>. Text, flex and grid mirror by themselves;
+   this block holds only what was written with a physical side, what has to stay left to right, and the type.
+   Everything here is scoped to [dir=rtl] or :lang(ar)/:lang(he), so left-to-right pages never see it. ---------- */
+/* mirrored: the bar, the footer's language menu, contact rows and their arrow, the step dot, the help closing block, callouts */
+[dir=rtl] .pbar>div{padding:0 18px 0 10px}
+[dir=rtl] .pbar nav{margin-left:0;margin-right:24px}
+[dir=rtl] .pbar .ghost{margin-left:0;margin-right:auto}
+[dir=rtl] .foot-lang{padding:0 16px 0 38px;background-position:left 16px center}
+[dir=rtl] .ct-topics li a:hover{padding-left:0;padding-right:12px}
+[dir=rtl] .ct-topics li i{transform:scaleX(-1)}
+[dir=rtl] .ct-topics li a:hover i{translate:-4px 0}
+[dir=rtl] .pd-step h3::before{margin:0 0 .18em 14px}
+[dir=rtl] .hp-end{text-align:right}
+[dir=rtl] .note{padding:16px 14px 16px 16px}
+/* the price reads "11.11 US$" here, wider than "$11.11": on a phone it shrinks to stay in its box (from 568px up it is the same size as everywhere) */
+[dir=rtl] .price{font-size:max(min(15.5vw,88px),min(12vw,168px))}
+/* kept left to right: the English headline, the email address, and everything that is a picture of a Mac screen or pure
+   motion (carousel track and its dots, scenes, marquee, the footer's 0/1 mark). Text inside still shapes by its own script. */
+[dir=rtl] .hero h1{direction:ltr;unicode-bidi:isolate}
+[dir=rtl] .ct-mail{direction:ltr;justify-content:flex-end}
+[dir=rtl] :is(.car,.screen,.scr,.ab-marq,.foot-bits){direction:ltr}
+[dir=rtl] .slide{direction:rtl} /* inside a slide the caption takes the reading side again; its screen (.scr) stays a Mac */
+[dir=rtl] .ab-marq span{direction:rtl} /* each phrase is its own right-to-left line, or mixed words (MIT) reorder across it */
+[dir=rtl] .ab-marq div{animation-direction:reverse} /* and it runs rightwards, so a phrase comes in by its first word */
+/* type: Arabic letters join, so no tracking at all, and the tight headings cramp Hebrew too (the Latin-only figures keep
+   theirs: price, clocks, the email address; option is left out so the language menu on other pages is untouched); no slanted
+   Arabic or Hebrew */
+:is(:lang(ar),:lang(he)):not(option,.price,.h-clock,.f-clock,.ct-mail,.ct-mail *){letter-spacing:0!important}
+:is(em,i,cite,dfn,var,address):is(:lang(ar),:lang(he)){font-style:normal}

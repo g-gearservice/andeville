@@ -3,6 +3,8 @@ set -e
 cd "$(dirname "$0")"
 mkdir -p Andeville.app/Contents/MacOS Andeville.app/Contents/Resources
 cp Info.plist Andeville.app/Contents/Info.plist
+# The app icon, drawn by make-icon.swift (run it again after changing the icon).
+cp Andeville.icns Andeville.app/Contents/Resources/
 for m in models/*.mlpackage; do xcrun coremlcompiler compile "$m" Andeville.app/Contents/Resources >/dev/null; done
 # Apple's AR models of the AirPods (apple.com, "View in AR"), turned in the notch when they connect. Not in git.
 cp AirPods3D/*.usdz Andeville.app/Contents/Resources/ 2>/dev/null || true
@@ -17,6 +19,13 @@ swiftc -swift-version 5 -target "$(uname -m)-apple-macos26.0" -parse-as-library 
 codesign --force --sign "Faytai Local Signing" --identifier com.ggear.faytai.controls --entitlements Controls/Controls.entitlements Andeville.app/Contents/PlugIns/AndevilleControls.appex
 codesign --force --sign "Faytai Local Signing" --identifier com.ggear.faytai Andeville.app
 Andeville.app/Contents/MacOS/Andeville --self-check
-# Re-signing the binary in place gets a running copy killed by macOS, so leave the new build running instead.
-pkill -x Andeville 2>/dev/null && sleep 1 || true
-open Andeville.app
+# Into /Applications, where the login item opens it. Swapped in by renames, never copied over the running copy
+# (rewriting a running app's files gets it killed): that copy sees the newer build within seconds and relaunches
+# into it on its own, the keychain handed over first (applicationDidFinishLaunching). Started when none is running.
+DEST=/Applications/Andeville.app
+TMP=$(mktemp -d /Applications/.Andeville-install.XXXXXX)
+ditto Andeville.app "$TMP/Andeville.app"
+if [ -d "$DEST" ]; then mv "$DEST" "$TMP/old.app"; fi
+mv "$TMP/Andeville.app" "$DEST"
+rm -rf "$TMP"
+pgrep -x Andeville >/dev/null || open "$DEST"
