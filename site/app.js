@@ -72,9 +72,9 @@ function heroScan() {
     screen.dataset.hero = s; heroText.textContent = text; heroHint.textContent = hint;
     screen.setAttribute("aria-label", label);
   };
-  set("scan", "Checking it’s you…", "Fill light on", "Notch: checking it’s you");
-  setTimeout(() => set("ok", "Welcome back", "Unlocked", "Notch: unlocked, welcome back"), 1600);
-  setTimeout(() => set("idle", "Checking it’s you…", "Point at the notch", "Notch: locked. Point here to unlock"), 5200);
+  set("scan", T("js.ui.checking", "Checking it’s you…"), T("js.index.fill_light_on", "Fill light on"), T("js.index.notch_scan", "Notch: checking it’s you"));
+  setTimeout(() => set("ok", T("js.ui.welcome", "Welcome back"), T("js.ui.unlocked", "Unlocked"), T("js.index.notch_ok", "Notch: unlocked, welcome back")), 1600);
+  setTimeout(() => set("idle", T("js.ui.checking", "Checking it’s you…"), T("js.ui.point", "Point at the notch"), T("js.index.notch_idle", "Notch: locked. Point here to unlock")), 5200);
 }
 screen.addEventListener("click", heroScan);
 screen.addEventListener("mouseenter", heroScan);
@@ -92,7 +92,7 @@ all.forEach((s, j) => {
   s.dataset.i = j % n;
   const b = document.createElement("button");
   b.className = "peek";
-  b.setAttribute("aria-label", "Show " + s.getAttribute("aria-label"));
+  b.setAttribute("aria-label", T("js.index.show", "Show {name}", { name: s.getAttribute("aria-label") }));
   if (s.hasAttribute("aria-hidden")) b.tabIndex = -1; // clones stay clickable, not tabbable
   b.addEventListener("click", () => moveTo(j));
   s.prepend(b);
@@ -125,7 +125,7 @@ function render() {
     d.firstChild.style.width = k === i ? Math.min(100, el / DUR * 100) + "%" : "0%";
   });
   car.classList.toggle("paused", !playing);
-  pp.setAttribute("aria-label", playing ? "Pause highlights" : "Play highlights");
+  pp.setAttribute("aria-label", playing ? T("js.index.pause", "Pause highlights") : T("js.index.play", "Play highlights"));
 }
 
 function moveTo(p) {

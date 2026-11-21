@@ -569,3 +569,53 @@ body::after{content:"";position:fixed;inset:0;z-index:2147483647;pointer-events:
 .ac [hidden]{display:none!important}
 .ac-dl dd input{width:100%;max-width:320px;min-height:44px;box-sizing:border-box;padding:0 12px;font:inherit;color:var(--ink);background:#1c1c1c;border:0;box-shadow:inset 0 0 0 1px #5a5a56}
 .ac #ac-dev{margin-top:32px}
+
+/* Languages. The Worker (api/pages.js) sets <html lang> and fills the footer menu; it stays hidden when a page is
+   served without it. The menu takes the small button's look (.sbtn). */
+.foot-lang{appearance:none;-webkit-appearance:none;min-height:44px;margin:0;padding:0 38px 0 16px;border:0;border-radius:0;background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23cfcfca' stroke-width='1.6'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 16px center;box-shadow:inset 0 0 0 1px #5a5a56;color:var(--ink);font:inherit;font-size:14px;font-weight:650;cursor:pointer}
+.foot-lang:hover{box-shadow:inset 0 0 0 1px var(--ink)}
+.foot-lang:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
+/* Teams, "We are [word] and more.": the two fixed pieces keep the heading's own colour (other spans in it are soft), and
+   the space before the changing word is drawn here so Japanese and Chinese, which set none, can drop it. */
+.tm-say .tm-we-a,.tm-say .tm-we-b{color:inherit}
+.tm-say .tm-we-a::after{content:" "}
+:lang(ja) .tm-say .tm-we-a::after,:lang(zh) .tm-say .tm-we-a::after{content:none}
+.pl-note:empty{display:none}
+.pl-note{margin:8px 0 0;font-size:15px;color:#8c8c87}
+/* Pretendard has Latin, Cyrillic, Hangul and kana, but no Han, Arabic or Hebrew letters. Japanese and Chinese would mix
+   its kana and Latin punctuation with the system's Han, so there it is kept to Latin letters, digits and arrows and
+   the system's own typeface sets the rest. */
+@font-face{font-family:"Pretendard Latin";src:url("fonts/PretendardVariable.woff2") format("woff2");font-weight:45 920;font-display:swap;unicode-range:U+0020-024F,U+2190-21FF,U+2318}
+:root:lang(ja) body{font-family:"Pretendard Latin","Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif}
+:root:lang(zh-Hans) body{font-family:"Pretendard Latin","PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+:root:lang(zh-Hant) body{font-family:"Pretendard Latin","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+
+/* ---------- Right to left (Arabic, Hebrew): the Worker puts dir="rtl" on <html>. Text, flex and grid mirror by themselves;
+   this block holds only what was written with a physical side, what has to stay left to right, and the type.
+   Everything here is scoped to [dir=rtl] or :lang(ar)/:lang(he), so left-to-right pages never see it. ---------- */
+/* mirrored: the bar, the footer's language menu, contact rows and their arrow, the step dot, the help closing block, callouts */
+[dir=rtl] .pbar>div{padding:0 18px 0 10px}
+[dir=rtl] .pbar nav{margin-left:0;margin-right:24px}
+[dir=rtl] .pbar .ghost{margin-left:0;margin-right:auto}
+[dir=rtl] .foot-lang{padding:0 16px 0 38px;background-position:left 16px center}
+[dir=rtl] .ct-topics li a:hover{padding-left:0;padding-right:12px}
+[dir=rtl] .ct-topics li i{transform:scaleX(-1)}
+[dir=rtl] .ct-topics li a:hover i{translate:-4px 0}
+[dir=rtl] .pd-step h3::before{margin:0 0 .18em 14px}
+[dir=rtl] .hp-end{text-align:right}
+[dir=rtl] .note{padding:16px 14px 16px 16px}
+/* the price reads "11.11 US$" here, wider than "$11.11": on a phone it shrinks to stay in its box (from 568px up it is the same size as everywhere) */
+[dir=rtl] .price{font-size:max(min(15.5vw,88px),min(12vw,168px))}
+/* kept left to right: the English headline, the email address, and everything that is a picture of a Mac screen or pure
+   motion (carousel track and its dots, scenes, marquee, the footer's 0/1 mark). Text inside still shapes by its own script. */
+[dir=rtl] .hero h1{direction:ltr;unicode-bidi:isolate}
+[dir=rtl] .ct-mail{direction:ltr;justify-content:flex-end}
+[dir=rtl] :is(.car,.screen,.scr,.ab-marq,.foot-bits){direction:ltr}
+[dir=rtl] .slide{direction:rtl} /* inside a slide the caption takes the reading side again; its screen (.scr) stays a Mac */
+[dir=rtl] .ab-marq span{direction:rtl} /* each phrase is its own right-to-left line, or mixed words (MIT) reorder across it */
+[dir=rtl] .ab-marq div{animation-direction:reverse} /* and it runs rightwards, so a phrase comes in by its first word */
+/* type: Arabic letters join, so no tracking at all, and the tight headings cramp Hebrew too (the Latin-only figures keep
+   theirs: price, clocks, the email address; option is left out so the language menu on other pages is untouched); no slanted
+   Arabic or Hebrew */
+:is(:lang(ar),:lang(he)):not(option,.price,.h-clock,.f-clock,.ct-mail,.ct-mail *){letter-spacing:0!important}
+:is(em,i,cite,dfn,var,address):is(:lang(ar),:lang(he)){font-style:normal}

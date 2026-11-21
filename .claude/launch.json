@@ -1,0 +1,49 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "site",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4173",
+        "-d",
+        "site"
+      ],
+      "port": 4173
+    },
+    {
+      "name": "pay",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "-y",
+        "wrangler@4",
+        "dev",
+        "-c",
+        "pay/wrangler.jsonc",
+        "--env=",
+        "--port",
+        "8788",
+        "--var",
+        "PADDLE_WEBHOOK_SECRET:pdl_ntfset_local"
+      ],
+      "port": 8788
+    },
+    {
+      "name": "account",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "-y",
+        "wrangler@4",
+        "dev",
+        "--env=",
+        "--port",
+        "8787",
+        "--var",
+        "DEV_LOGIN_TOKEN:local"
+      ],
+      "port": 8787
+    }
+  ]
+}

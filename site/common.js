@@ -1,10 +1,27 @@
-// Shared by every page: the price and checkout placeholders, and the live logo.
-const PRICE = "$11.11";
-document.querySelectorAll("[data-price]").forEach(e => e.textContent = PRICE);
+// Shared by every page: translated strings for the scripts, the price and dates in the visitor's own format, the
+// checkout link, the language menu, and the live logo.
+// T(key, english, { name: value }): the page's language if the Worker put it in window.I18N, else the English given.
+const T = (k, en, v = {}) => ((window.I18N && window.I18N[k]) || en).replace(/\{(\w+)\}/g, (_, n) => v[n]);
 
-// Payments happen on their own plate: pay.andeville.app (sandbox twin on workers.dev for every other host).
-const PAY_URL = /(^|\.)andeville\.app$/.test(location.hostname) ? "https://pay.andeville.app/" : "https://andeville-pay.gearservice.workers.dev/";
+// Numbers and dates follow the device's own region when it speaks the page's language (en-CA reads US$11.11, es-MX
+// USD 11.11, where a bare $ would mean their own dollar or peso); otherwise the page's language decides.
+const LANG = document.documentElement.lang || "en";
+const speaks = l => { try { const a = new Intl.Locale(l).maximize(), b = new Intl.Locale(LANG).maximize(); return a.language === b.language && a.script === b.script; } catch { return false; } };
+const REGION = (navigator.languages || []).find(speaks) || LANG;
+const PRICE = new Intl.NumberFormat(REGION, { style: "currency", currency: "USD", numberingSystem: "latn" }).format(11.11);
+document.querySelectorAll("[data-price]").forEach(e => e.textContent = PRICE);
+// "US$11.11" is wider than "$11.11": the big price shrinks by as much, so it takes the room the English one does.
+document.querySelectorAll(".price").forEach(e => e.style.setProperty("--k", Math.min(1, 6 / PRICE.replace(/[\u200e\u200f\u061c]/g, "").length)));
+const DATE = new Intl.DateTimeFormat(REGION, { dateStyle: "long", timeZone: "UTC", calendar: "gregory", numberingSystem: "latn" });
+document.querySelectorAll("time[datetime]").forEach(e => e.textContent = DATE.format(new Date(e.dateTime)));
+
+// Payments happen on their own plate: pay.andeville.app (sandbox twin on workers.dev for every other host). It is told
+// the page's language so the checkout carries on in it.
+const PAY_URL = (/(^|\.)andeville\.app$/.test(location.hostname) ? "https://pay.andeville.app/" : "https://andeville-pay.gearservice.workers.dev/") + "?lang=" + LANG.toLowerCase();
 document.querySelectorAll("[data-buy]").forEach(e => e.href = PAY_URL);
+
+// Footer language menu: the Worker fills it with each language's address for this page.
+document.querySelector(".foot-lang")?.addEventListener("change", e => location.href = e.target.value);
 
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 

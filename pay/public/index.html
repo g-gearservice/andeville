@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Get Andeville · Payment</title>
+<title data-i18n="pay.title">Get Andeville · Payment</title>
 <meta name="description" content="Buy Andeville: a personal licence for one Mac, $11.11 once.">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#262626">
@@ -33,22 +33,23 @@ footer b{color:var(--ink);font-weight:650}
 <body>
 <main>
   <section class="card" aria-labelledby="h">
-    <div class="lbl">Personal licence · one Mac · one-time</div>
+    <div class="lbl" data-i18n="pay.kind">Personal licence · one Mac · one-time</div>
     <h1 id="h">Andeville</h1>
-    <p>Face unlock, App Lock, now playing, AirPods, fill light, Labs and Control Center controls.</p>
-    <div class="price">$11.11</div>
-    <p>Taxes are worked out at checkout. Refunds within 14 days.</p>
-    <div id="ts" aria-label="Bot check"></div>
-    <button id="pay" type="button" disabled>Pay $11.11</button>
+    <p data-i18n="pay.what">Face unlock, App Lock, now playing, AirPods, fill light, Labs and Control Center controls.</p>
+    <div class="price" data-price>$11.11</div>
+    <p data-i18n="pay.terms">Taxes are worked out at checkout. Refunds within 14 days.</p>
+    <div id="ts" data-i18n-attr="aria-label:pay.bot" aria-label="Bot check"></div>
+    <button id="pay" type="button" disabled data-i18n="pay.button">Pay <span data-price>$11.11</span></button>
     <div id="msg" role="status" aria-live="polite"></div>
-    <a class="back" href="https://andeville.app/">← Back to andeville.app</a>
+    <a class="back" href="https://andeville.app/" data-i18n="pay.back">← Back to andeville.app</a>
   </section>
 </main>
 <footer>
   <div><b>Payment vanguard</b> · g.gear service vanguard team</div>
-  <div>g.gear service delta · Payments by Paddle.com, Merchant of Record</div>
+  <div data-i18n="pay.by">g.gear service delta · Payments by Paddle.com, Merchant of Record</div>
 </footer>
-<script src="pay.js?v=4"></script>
+<script src="i18n.js?v=1"></script>
+<script src="pay.js?v=5"></script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstile" async defer></script>
 </body>
 </html>

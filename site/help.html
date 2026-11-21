@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Help · Andeville</title>
-<meta name="description" content="How to set up and use Andeville: face unlock, App Lock, the notch player, Labs, and fixes when something does not work.">
+<title data-i18n="help.title">Help · Andeville</title>
+<meta name="description" content="How to set up and use Andeville: face unlock, App Lock, the notch player, Labs, and fixes when something does not work." data-i18n-attr="content:help.meta_description">
 <meta name="theme-color" content="#262626">
 <link rel="preload" href="fonts/PretendardVariable.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="style.css?v=112">
+<link rel="stylesheet" href="style.css?v=114">
 </head>
 <body>
 
@@ -16,56 +16,56 @@
 <main class="pg hp">
 <!-- structure after burgundy.studio/faq (Awwwards): a title, groups of questions, then who to ask -->
 <section class="w hp-head">
-  <h1>Common questions</h1>
-  <p>Setting it up, using it, and fixing it.</p>
+  <h1 data-i18n="help.head.title">Common questions</h1>
+  <p data-i18n="help.head.sub">Setting it up, using it, and fixing it.</p>
 </section>
 <div class="w hp-body">
   <section class="hp-group" id="start" aria-labelledby="start-h">
-    <h2 id="start-h">Getting started</h2>
+    <h2 id="start-h" data-i18n="help.start.title">Getting started</h2>
     <div class="hp-list">
-      <details><summary>What do I need?</summary><div class="hp-a"><p>A MacBook with a notch and macOS 14 or later. Control Center in the notch needs macOS 26.</p></div></details>
-      <details><summary>How do I set it up?</summary><div class="hp-a"><p>Open Andeville and its settings, then:</p><p>Allow the camera. Register your face, alone and in good light. Turn on lock screen unlock and enter your Mac password. Allow Accessibility so it can type that password for you.</p><p>Turn on “start at login” if you want it always running.</p></div></details>
-      <details><summary>Where is my password kept?</summary><div class="hp-a"><p>In your Mac’s Keychain, only after you sign the consent. Your face data is encrypted and stays on this Mac.</p></div></details>
+      <details><summary data-i18n="help.start.need.q">What do I need?</summary><div class="hp-a"><p data-i18n="help.start.need.a1">A MacBook with a notch and macOS 14 or later. Control Center in the notch needs macOS 26.</p></div></details>
+      <details><summary data-i18n="help.start.setup.q">How do I set it up?</summary><div class="hp-a"><p data-i18n="help.start.setup.a1">Open Andeville and its settings, then:</p><p data-i18n="help.start.setup.a2">Allow the camera. Register your face, alone and in good light. Turn on lock screen unlock and enter your Mac password. Allow Accessibility so it can type that password for you.</p><p data-i18n="help.start.setup.a3">Turn on “start at login” if you want it always running.</p></div></details>
+      <details><summary data-i18n="help.start.password.q">Where is my password kept?</summary><div class="hp-a"><p data-i18n="help.start.password.a1">In your Mac’s Keychain, only after you sign the consent. Your face data is encrypted and stays on this Mac.</p></div></details>
     </div>
   </section>
   <section class="hp-group" id="daily" aria-labelledby="daily-h">
-    <h2 id="daily-h">Every day</h2>
+    <h2 id="daily-h" data-i18n="help.daily.title">Every day</h2>
     <div class="hp-list">
-      <details><summary>How do I unlock my Mac?</summary><div class="hp-a"><p>At the lock screen, move the cursor onto the notch. If it doesn’t know you, use Touch ID or your password.</p></div></details>
-      <details><summary>How do I lock an app?</summary><div class="hp-a"><p>Add it to App Lock in settings. It checks your face each time it opens. Taking it off the list needs your face too.</p></div></details>
-      <details><summary>How do I skip a track?</summary><div class="hp-a"><p>Swipe with two fingers on the notch.</p></div></details>
-      <details><summary>Where do my AirPods show?</summary><div class="hp-a"><p>In the notch, as soon as they connect, with the battery for each bud and the case.</p></div></details>
-      <details><summary>How do I open Control Center?</summary><div class="hp-a"><p>Rest the cursor on the notch. You can set how fast it opens and closes. Needs macOS 26.</p></div></details>
+      <details><summary data-i18n="help.daily.unlock.q">How do I unlock my Mac?</summary><div class="hp-a"><p data-i18n="help.daily.unlock.a1">At the lock screen, move the cursor onto the notch. If it doesn’t know you, use Touch ID or your password.</p></div></details>
+      <details><summary data-i18n="help.daily.applock.q">How do I lock an app?</summary><div class="hp-a"><p data-i18n="help.daily.applock.a1">Add it to App Lock in settings. It checks your face each time it opens. Taking it off the list needs your face too.</p></div></details>
+      <details><summary data-i18n="help.daily.skip.q">How do I skip a track?</summary><div class="hp-a"><p data-i18n="help.daily.skip.a1">Swipe with two fingers on the notch.</p></div></details>
+      <details><summary data-i18n="help.daily.airpods.q">Where do my AirPods show?</summary><div class="hp-a"><p data-i18n="help.daily.airpods.a1">In the notch, as soon as they connect, with the battery for each bud and the case.</p></div></details>
+      <details><summary data-i18n="help.daily.control_center.q">How do I open Control Center?</summary><div class="hp-a"><p data-i18n="help.daily.control_center.a1">Rest the cursor on the notch. You can set how fast it opens and closes. Needs macOS 26.</p></div></details>
     </div>
   </section>
   <section class="hp-group" id="tune" aria-labelledby="tune-h">
-    <h2 id="tune-h">Making it stricter</h2>
+    <h2 id="tune-h" data-i18n="help.tune.title">Making it stricter</h2>
     <div class="hp-list">
-      <details><summary>It lets the wrong face in. What do I change?</summary><div class="hp-a"><p>Lower the match threshold, or raise the liveness threshold. Stricter settings may ask you to try again more often.</p></div></details>
-      <details><summary>It can’t see me in the dark.</summary><div class="hp-a"><p>Turn on screen light. The screen glows white while it looks.</p></div></details>
-      <details><summary>Can it stay ready at the lock screen?</summary><div class="hp-a"><p>Turn on stay awake. Closing the lid still puts the Mac to sleep.</p></div></details>
+      <details><summary data-i18n="help.tune.wrong_face.q">It lets the wrong face in. What do I change?</summary><div class="hp-a"><p data-i18n="help.tune.wrong_face.a1">Lower the match threshold, or raise the liveness threshold. Stricter settings may ask you to try again more often.</p></div></details>
+      <details><summary data-i18n="help.tune.dark.q">It can’t see me in the dark.</summary><div class="hp-a"><p data-i18n="help.tune.dark.a1">Turn on screen light. The screen glows white while it looks.</p></div></details>
+      <details><summary data-i18n="help.tune.stay_ready.q">Can it stay ready at the lock screen?</summary><div class="hp-a"><p data-i18n="help.tune.stay_ready.a1">Turn on stay awake. Closing the lid still puts the Mac to sleep.</p></div></details>
     </div>
   </section>
   <section class="hp-group" id="labs" aria-labelledby="labs-h">
-    <h2 id="labs-h">Labs</h2>
+    <h2 id="labs-h" data-i18n="help.labs.title">Labs</h2>
     <div class="hp-list">
-      <details><summary>What is presence sensing?</summary><div class="hp-a"><p>It starts looking for you when you come back to your desk. It listens for an echo of a tone too high to hear, or watches your AirPods’ signal. Nothing is recorded.</p></div></details>
-      <details><summary>What is the desk browser?</summary><div class="hp-a"><p>Show the desktop and it becomes a browser behind your windows. ⌘D adds a bookmark.</p></div></details>
+      <details><summary data-i18n="help.labs.presence.q">What is presence sensing?</summary><div class="hp-a"><p data-i18n="help.labs.presence.a1">It starts looking for you when you come back to your desk. It listens for an echo of a tone too high to hear, or watches your AirPods’ signal. Nothing is recorded.</p></div></details>
+      <details><summary data-i18n="help.labs.desk_browser.q">What is the desk browser?</summary><div class="hp-a"><p data-i18n="help.labs.desk_browser.a1">Show the desktop and it becomes a browser behind your windows. ⌘D adds a bookmark.</p></div></details>
     </div>
   </section>
   <section class="hp-group" id="fixes" aria-labelledby="fixes-h">
-    <h2 id="fixes-h">If something doesn’t work</h2>
+    <h2 id="fixes-h" data-i18n="help.fixes.title">If something doesn’t work</h2>
     <div class="hp-list">
-      <details><summary>It can’t see my face.</summary><div class="hp-a"><p>Check camera access in System Settings › Privacy &amp; Security › Camera, then register your face again.</p></div></details>
-      <details><summary>It knows me but won’t unlock.</summary><div class="hp-a"><p>Allow Accessibility in System Settings › Privacy &amp; Security › Accessibility, and check you signed the Keychain consent.</p></div></details>
-      <details><summary>How do I update?</summary><div class="hp-a"><p>Install the new Andeville DMG over the old one.</p></div></details>
-      <details><summary>Is it Face ID?</summary><div class="hp-a"><p>No. It uses the FaceTime camera and an on-device check for photos. Touch ID and your password always work.</p></div></details>
+      <details><summary data-i18n="help.fixes.no_face.q">It can’t see my face.</summary><div class="hp-a"><p data-i18n="help.fixes.no_face.a1">Check camera access in System Settings › Privacy &amp; Security › Camera, then register your face again.</p></div></details>
+      <details><summary data-i18n="help.fixes.no_unlock.q">It knows me but won’t unlock.</summary><div class="hp-a"><p data-i18n="help.fixes.no_unlock.a1">Allow Accessibility in System Settings › Privacy &amp; Security › Accessibility, and check you signed the Keychain consent.</p></div></details>
+      <details><summary data-i18n="help.fixes.update.q">How do I update?</summary><div class="hp-a"><p data-i18n="help.fixes.update.a1">Install the new Andeville DMG over the old one.</p></div></details>
+      <details><summary data-i18n="help.fixes.face_id.q">Is it Face ID?</summary><div class="hp-a"><p data-i18n="help.fixes.face_id.a1">No. It uses the FaceTime camera and an on-device check for photos. Touch ID and your password always work.</p></div></details>
     </div>
   </section>
 </div>
 <section class="w hp-end" aria-labelledby="hp-end-h">
-  <h2 id="hp-end-h">Still have a question?</h2>
-  <a class="btn acc" href="contact.html">Write to us</a>
+  <h2 id="hp-end-h" data-i18n="help.end.title">Still have a question?</h2>
+  <a class="btn acc" href="contact.html" data-i18n="help.end.cta">Write to us</a>
 </section>
 </main>
 
@@ -77,25 +77,26 @@
 <radialGradient id="fi-sheen" cx=".5" cy="-.15" r=".85"><stop offset="0" stop-color="#fff" stop-opacity=".16"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
 <linearGradient id="fi-rim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset=".3" stop-color="#fff" stop-opacity=".1"/><stop offset=".75" stop-color="#fff" stop-opacity=".06"/><stop offset="1" stop-color="#fff" stop-opacity=".22"/></linearGradient>
 </defs><path d="M100.00 50.00 L99.97 65.36 L99.89 70.26 L99.75 73.81 L99.56 76.68 L99.31 79.12 L99.01 81.26 L98.64 83.17 L98.22 84.89 L97.74 86.46 L97.20 87.89 L96.60 89.21 L95.94 90.43 L95.20 91.54 L94.40 92.58 L93.53 93.53 L92.58 94.40 L91.54 95.20 L90.43 95.94 L89.21 96.60 L87.89 97.20 L86.46 97.74 L84.89 98.22 L83.17 98.64 L81.26 99.01 L79.12 99.31 L76.68 99.56 L73.81 99.75 L70.26 99.89 L65.36 99.97 L50.00 100.00 L34.64 99.97 L29.74 99.89 L26.19 99.75 L23.32 99.56 L20.88 99.31 L18.74 99.01 L16.83 98.64 L15.11 98.22 L13.54 97.74 L12.11 97.20 L10.79 96.60 L9.57 95.94 L8.46 95.20 L7.42 94.40 L6.47 93.53 L5.60 92.58 L4.80 91.54 L4.06 90.43 L3.40 89.21 L2.80 87.89 L2.26 86.46 L1.78 84.89 L1.36 83.17 L0.99 81.26 L0.69 79.12 L0.44 76.68 L0.25 73.81 L0.11 70.26 L0.03 65.36 L0.00 50.00 L0.03 34.64 L0.11 29.74 L0.25 26.19 L0.44 23.32 L0.69 20.88 L0.99 18.74 L1.36 16.83 L1.78 15.11 L2.26 13.54 L2.80 12.11 L3.40 10.79 L4.06 9.57 L4.80 8.46 L5.60 7.42 L6.47 6.47 L7.42 5.60 L8.46 4.80 L9.57 4.06 L10.79 3.40 L12.11 2.80 L13.54 2.26 L15.11 1.78 L16.83 1.36 L18.74 0.99 L20.88 0.69 L23.32 0.44 L26.19 0.25 L29.74 0.11 L34.64 0.03 L50.00 0.00 L65.36 0.03 L70.26 0.11 L73.81 0.25 L76.68 0.44 L79.12 0.69 L81.26 0.99 L83.17 1.36 L84.89 1.78 L86.46 2.26 L87.89 2.80 L89.21 3.40 L90.43 4.06 L91.54 4.80 L92.58 5.60 L93.53 6.47 L94.40 7.42 L95.20 8.46 L95.94 9.57 L96.60 10.79 L97.20 12.11 L97.74 13.54 L98.22 15.11 L98.64 16.83 L99.01 18.74 L99.31 20.88 L99.56 23.32 L99.75 26.19 L99.89 29.74 L99.97 34.64Z" fill="url(#fi-bg)"/><path d="M100.00 50.00 L99.97 65.36 L99.89 70.26 L99.75 73.81 L99.56 76.68 L99.31 79.12 L99.01 81.26 L98.64 83.17 L98.22 84.89 L97.74 86.46 L97.20 87.89 L96.60 89.21 L95.94 90.43 L95.20 91.54 L94.40 92.58 L93.53 93.53 L92.58 94.40 L91.54 95.20 L90.43 95.94 L89.21 96.60 L87.89 97.20 L86.46 97.74 L84.89 98.22 L83.17 98.64 L81.26 99.01 L79.12 99.31 L76.68 99.56 L73.81 99.75 L70.26 99.89 L65.36 99.97 L50.00 100.00 L34.64 99.97 L29.74 99.89 L26.19 99.75 L23.32 99.56 L20.88 99.31 L18.74 99.01 L16.83 98.64 L15.11 98.22 L13.54 97.74 L12.11 97.20 L10.79 96.60 L9.57 95.94 L8.46 95.20 L7.42 94.40 L6.47 93.53 L5.60 92.58 L4.80 91.54 L4.06 90.43 L3.40 89.21 L2.80 87.89 L2.26 86.46 L1.78 84.89 L1.36 83.17 L0.99 81.26 L0.69 79.12 L0.44 76.68 L0.25 73.81 L0.11 70.26 L0.03 65.36 L0.00 50.00 L0.03 34.64 L0.11 29.74 L0.25 26.19 L0.44 23.32 L0.69 20.88 L0.99 18.74 L1.36 16.83 L1.78 15.11 L2.26 13.54 L2.80 12.11 L3.40 10.79 L4.06 9.57 L4.80 8.46 L5.60 7.42 L6.47 6.47 L7.42 5.60 L8.46 4.80 L9.57 4.06 L10.79 3.40 L12.11 2.80 L13.54 2.26 L15.11 1.78 L16.83 1.36 L18.74 0.99 L20.88 0.69 L23.32 0.44 L26.19 0.25 L29.74 0.11 L34.64 0.03 L50.00 0.00 L65.36 0.03 L70.26 0.11 L73.81 0.25 L76.68 0.44 L79.12 0.69 L81.26 0.99 L83.17 1.36 L84.89 1.78 L86.46 2.26 L87.89 2.80 L89.21 3.40 L90.43 4.06 L91.54 4.80 L92.58 5.60 L93.53 6.47 L94.40 7.42 L95.20 8.46 L95.94 9.57 L96.60 10.79 L97.20 12.11 L97.74 13.54 L98.22 15.11 L98.64 16.83 L99.01 18.74 L99.31 20.88 L99.56 23.32 L99.75 26.19 L99.89 29.74 L99.97 34.64Z" fill="url(#fi-sheen)"/><path d="M99.25 50.00 L99.22 65.13 L99.14 69.96 L99.01 73.45 L98.82 76.28 L98.57 78.68 L98.27 80.79 L97.91 82.67 L97.50 84.37 L97.03 85.91 L96.50 87.32 L95.90 88.62 L95.25 89.82 L94.53 90.92 L93.74 91.94 L92.87 92.87 L91.94 93.74 L90.92 94.53 L89.82 95.25 L88.62 95.90 L87.32 96.50 L85.91 97.03 L84.37 97.50 L82.67 97.91 L80.79 98.27 L78.68 98.57 L76.28 98.82 L73.45 99.01 L69.96 99.14 L65.13 99.22 L50.00 99.25 L34.87 99.22 L30.04 99.14 L26.55 99.01 L23.72 98.82 L21.32 98.57 L19.21 98.27 L17.33 97.91 L15.63 97.50 L14.09 97.03 L12.68 96.50 L11.38 95.90 L10.18 95.25 L9.08 94.53 L8.06 93.74 L7.13 92.87 L6.26 91.94 L5.47 90.92 L4.75 89.82 L4.10 88.62 L3.50 87.32 L2.97 85.91 L2.50 84.37 L2.09 82.67 L1.73 80.79 L1.43 78.68 L1.18 76.28 L0.99 73.45 L0.86 69.96 L0.78 65.13 L0.75 50.00 L0.78 34.87 L0.86 30.04 L0.99 26.55 L1.18 23.72 L1.43 21.32 L1.73 19.21 L2.09 17.33 L2.50 15.63 L2.97 14.09 L3.50 12.68 L4.10 11.38 L4.75 10.18 L5.47 9.08 L6.26 8.06 L7.13 7.13 L8.06 6.26 L9.08 5.47 L10.18 4.75 L11.38 4.10 L12.68 3.50 L14.09 2.97 L15.63 2.50 L17.33 2.09 L19.21 1.73 L21.32 1.43 L23.72 1.18 L26.55 0.99 L30.04 0.86 L34.87 0.78 L50.00 0.75 L65.13 0.78 L69.96 0.86 L73.45 0.99 L76.28 1.18 L78.68 1.43 L80.79 1.73 L82.67 2.09 L84.37 2.50 L85.91 2.97 L87.32 3.50 L88.62 4.10 L89.82 4.75 L90.92 5.47 L91.94 6.26 L92.87 7.13 L93.74 8.06 L94.53 9.08 L95.25 10.18 L95.90 11.38 L96.50 12.68 L97.03 14.09 L97.50 15.63 L97.91 17.33 L98.27 19.21 L98.57 21.32 L98.82 23.72 L99.01 26.55 L99.14 30.04 L99.22 34.87Z" fill="none" stroke="url(#fi-rim)" stroke-width="1.5"/><g class="fi-mark" transform="translate(22 13.5) scale(.084)"><polygon points="205.86 305.25 33.23 669.54 0 668.1 208.1 245.56 205.86 305.25"/><polygon points="205.86 305.25 342.79 668.1 355.78 668.1 323.15 320.05 208.14 244.44 205.86 305.25"/><polygon points="481.53 411.32 350.62 283.23 323.4 321.66 370.24 668.1 445.68 668.1 481.53 411.32"/><polygon points="489.22 668.1 440.13 371.17 576.88 210.25 668.1 668.1"/></g></svg></span>
-      <p class="foot-name"><b>Andeville</b> <span>by g.gearservice</span></p>
+      <p class="foot-name"><b>Andeville</b> <span data-i18n="foot.by">by g.gearservice</span></p>
     </div>
+    <select class="foot-lang" data-i18n-attr="aria-label:foot.lang" aria-label="Language" hidden></select>
   </div>
   <div class="w foot-cols">
     <div class="foot-pitch">
-      <p>The notch that looks back. Made in Seoul, with care and a lot of coffee.</p>
-      <a class="foot-get" href="index.html#buy">Get Andeville</a>
+      <p data-i18n="foot.pitch">The notch that looks back. Made in Seoul, with care and a lot of coffee.</p>
+      <a class="foot-get" href="index.html#buy" data-i18n="cta.get">Get Andeville</a>
     </div>
     <nav aria-label="Andeville">
       <div class="lbl">Andeville</div>
-      <a href="products.html">Products</a><a href="help.html">Help</a><a href="account.html">Account</a>
+      <a href="products.html" data-i18n="nav.products">Products</a><a href="help.html" data-i18n="nav.help">Help</a><a href="account.html" data-i18n="nav.account">Account</a>
     </nav>
     <nav aria-label="G.gear service">
       <div class="lbl">G.gear service</div>
-      <a href="about.html">About</a><a href="teams.html">Teams</a><a href="contact.html">Contact</a>
+      <a href="about.html" data-i18n="nav.about">About</a><a href="teams.html" data-i18n="nav.teams">Teams</a><a href="contact.html" data-i18n="nav.contact">Contact</a>
     </nav>
-    <nav aria-label="Legal">
-      <div class="lbl">Legal</div>
-      <a href="policy.html">Policy</a>
+    <nav data-i18n-attr="aria-label:foot.legal" aria-label="Legal">
+      <div class="lbl" data-i18n="foot.legal">Legal</div>
+      <a href="policy.html" data-i18n="nav.policy">Policy</a>
     </nav>
   </div>
   <div class="foot-sink"><pre class="foot-bits" aria-hidden="true"></pre></div>
@@ -103,6 +104,6 @@
 </footer>
 
 <script type="module" src="gg.js?v=1"></script>
-<script src="common.js?v=63"></script>
+<script src="common.js?v=64"></script>
 </body>
 </html>

@@ -1,19 +1,24 @@
-// andeville.app accounts API, same origin as the site. Only /api/* reaches this script (see api/README.md).
+// andeville.app accounts API, same origin as the site (see api/README.md). Everything outside /api/ is a page: pages.js.
 //   GET  /api/config  /api/me  /api/download
-//   POST /api/auth/google  /api/auth/dev  /api/auth/signout  /api/claim  /api/account/delete
-// KV (ACCOUNTS): "user:<sub>" -> { sub, email, name, picture, created, keys }, "sess:<id>" -> { sub }
+//   POST /api/auth/google  /api/auth/dev  /api/auth/signout  /api/claim  /api/account/delete  /api/app/link  /api/app/token
+// KV (ACCOUNTS): "user:<sub>" -> { sub, email, name, picture, created, keys }, "sess:<id>" -> { sub, created, app? },
+// "link:<code>" -> { sub, created, challenge } (5 minutes, one use: the app's sign-in on its way back from the browser)
 // KV (LICENCES): "txn:<txn>" -> key and "key:<key>" -> { txn, customer, status } are pay/worker.js's and only read here
 // (rewriting a record could undo a refund's revoke landing in between); this Worker's own is "owner:<key>" -> sub.
+
+import { page } from "./pages.js";
 
 const JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 const COOKIE = "andv_s";
 const TTL = 2592000; // 30 days
+const APP_TTL = 31536000; // a year: the app's session, renewed by signing in again
 let jwks = { keys: [], exp: 0 }; // module-level: survives across requests in one isolate
 
 const json = (o, status = 200, headers = {}) => Response.json(o, { status, headers: { "cache-control": "no-store", ...headers } });
 const cookie = (v, age) => `${COOKIE}=${v}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
 const unavailable = () => json({ error: "unavailable" }, 503);
 const read = async (kv, k) => { const v = await kv.get(k); return v ? JSON.parse(v) : null; };
+const hex = n => [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, "0")).join("");
 const b64 = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
 
 async function fetchJwks() {
@@ -54,17 +59,19 @@ async function signIn(env, sub, { email, name, picture }) {
   const old = await read(env.ACCOUNTS, `user:${sub}`);
   const user = { sub, email, name, picture, created: old?.created ?? new Date().toISOString(), keys: old?.keys ?? [] };
   await env.ACCOUNTS.put(`user:${sub}`, JSON.stringify(user));
-  const id = [...crypto.getRandomValues(new Uint8Array(32))].map(b => b.toString(16).padStart(2, "0")).join("");
+  const id = hex(32);
   await env.ACCOUNTS.put(`sess:${id}`, JSON.stringify({ sub, created: user.created }), { expirationTtl: TTL });
   return json({ ok: true }, 200, { "set-cookie": cookie(id, TTL) });
 }
 
 async function session(req, env) {
-  const id = /(?:^|;\s*)andv_s=([0-9a-f]{64})/.exec(req.headers.get("cookie") || "")?.[1];
+  // The app sends its session as a bearer token; the browser's is the cookie.
+  const id = /^Bearer ([0-9a-f]{64})$/.exec(req.headers.get("authorization") || "")?.[1]
+    ?? /(?:^|;\s*)andv_s=([0-9a-f]{64})/.exec(req.headers.get("cookie") || "")?.[1];
   const s = id && (await read(env.ACCOUNTS, `sess:${id}`));
   const user = s && (await read(env.ACCOUNTS, `user:${s.sub}`));
   // An account deleted and made again has a new `created`: sessions from before the delete stay dead.
-  return user && user.created === s.created ? { id, user } : null;
+  return user && user.created === s.created ? { id, user, app: !!s.app } : null;
 }
 
 // the user's licences as { key, status, txn }; records that vanished are skipped
@@ -80,11 +87,13 @@ async function licences(env, user) {
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
+    if (!url.pathname.startsWith("/api/")) return page(req, env, url);
     const route = `${req.method} ${url.pathname}`;
     const need = {
       "GET /api/me": [env.ACCOUNTS, env.LICENCES], "GET /api/download": [env.ACCOUNTS, env.LICENCES, env.DOWNLOADS, env.DMG_KEY],
       "POST /api/auth/google": [env.ACCOUNTS], "POST /api/auth/dev": [env.ACCOUNTS], "POST /api/auth/signout": [env.ACCOUNTS],
       "POST /api/claim": [env.ACCOUNTS, env.LICENCES], "POST /api/account/delete": [env.ACCOUNTS, env.LICENCES],
+      "POST /api/app/link": [env.ACCOUNTS], "POST /api/app/token": [env.ACCOUNTS],
     }[route];
 
     if (route === "GET /api/config")
@@ -93,7 +102,9 @@ export default {
 
     let body;
     if (req.method === "POST") { // CSRF: JSON content-type forces a preflight, Origin pins the caller to this site
-      if (!(req.headers.get("content-type") || "").startsWith("application/json") || req.headers.get("origin") !== url.origin)
+      // The app has no Origin: its calls carry a bearer token or a one-time code, never the cookie a forged page would ride on.
+      const fromApp = route === "POST /api/app/token" || (req.headers.has("authorization") && !req.headers.has("cookie"));
+      if (!(req.headers.get("content-type") || "").startsWith("application/json") || !(fromApp || req.headers.get("origin") === url.origin))
         return json({ error: "forbidden" }, 403);
       body = await req.json().catch(() => null);
       if (!body || typeof body !== "object") body = {};
@@ -112,6 +123,19 @@ export default {
       return signIn(env, `dev:${email}`, { email, name: String(body.name || email.split("@")[0]).slice(0, 100), picture: "" });
     }
 
+    if (route === "POST /api/app/token") { // the app trades the code for its session; the verifier proves it began the sign-in
+      const code = /^[0-9a-f]{64}$/.test(body.code) ? body.code : "";
+      const link = code && (await read(env.ACCOUNTS, `link:${code}`));
+      if (!link) return json({ error: "bad code" }, 401);
+      await env.ACCOUNTS.delete(`link:${code}`);
+      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(body.verifier ?? ""))));
+      const challenge = btoa(String.fromCharCode(...digest)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      if (!(await same(challenge, link.challenge))) return json({ error: "bad code" }, 401);
+      const token = hex(32);
+      await env.ACCOUNTS.put(`sess:${token}`, JSON.stringify({ sub: link.sub, created: link.created, app: true }), { expirationTtl: APP_TTL });
+      return json({ token });
+    }
+
     const s = await session(req, env);
     if (!s) return route === "POST /api/auth/signout" ? json({ ok: true }, 200, { "set-cookie": cookie("", 0) }) : json({ error: "signed out" }, 401);
     const { user } = s;
@@ -127,7 +151,8 @@ export default {
       return json({
         user: { email, name, picture },
         licences: ls.map(({ key, status, txn }) => ({ key, status, txn })),
-        download: { available: ls.some(l => l.status === "active") && !!env.DOWNLOADS && !!env.DMG_KEY, name: env.DMG_KEY || "" },
+        download: { available: ls.some(l => l.status === "active") && !!env.DOWNLOADS && !!env.DMG_KEY, name: env.DMG_KEY || "",
+          version: /-(\d+(?:\.\d+)*)\.dmg$/.exec(env.DMG_KEY || "")?.[1] ?? "" }, // "Andeville-0.4.dmg" -> "0.4": the app's update check
       });
     }
 
@@ -139,6 +164,16 @@ export default {
         "content-type": "application/x-apple-diskimage", "content-disposition": `attachment; filename="${env.DMG_KEY}"`,
         "content-length": String(obj.size), "cache-control": "private, no-store",
       } });
+    }
+
+    // The app's session reads the account and downloads; changing the account stays with the browser.
+    if (s.app) return json({ error: "forbidden" }, 403);
+
+    if (route === "POST /api/app/link") { // the signed-in page vouches for the app that sent the user here
+      if (!/^[A-Za-z0-9_-]{43}$/.test(body.challenge ?? "")) return json({ error: "bad challenge" }, 400);
+      const code = hex(32);
+      await env.ACCOUNTS.put(`link:${code}`, JSON.stringify({ sub: user.sub, created: user.created, challenge: body.challenge }), { expirationTtl: 300 });
+      return json({ code });
     }
 
     if (route === "POST /api/claim") {

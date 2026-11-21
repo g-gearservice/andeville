@@ -88,7 +88,33 @@ assert.deepEqual(JSON.parse(env.ACCOUNTS.m.get("user:dev:a@b.c")).keys, [key]); 
 
 me = await (await call("/api/me", { cookie: A.cookie })).json();
 assert.deepEqual(me.licences, [{ key, status: "active", txn }]);
-assert.deepEqual(me.download, { available: true, name: "Andeville.dmg" });
+assert.deepEqual(me.download, { available: true, name: "Andeville.dmg", version: "" });
+assert.equal((await (await call("/api/me", { cookie: A.cookie, e: { ...env, DMG_KEY: "Andeville-0.4.1.dmg" } })).json()).download.version, "0.4.1");
+
+// app sign-in: the page links a challenge, the app trades code + verifier for a bearer session (no Origin, no cookie)
+const verifier = "v".repeat(43), challenge = Buffer.from(await crypto.subtle.digest("SHA-256", Buffer.from(verifier))).toString("base64url");
+const link = async c => (await (await call("/api/app/link", { method: "POST", body: { challenge }, cookie: c })).json()).code;
+const trade = b => w.fetch(new Request(O + "/api/app/token", { method: "POST", body: JSON.stringify(b), headers: { "content-type": "application/json" } }), env);
+assert.equal((await call("/api/app/link", { method: "POST", body: { challenge } })).status, 401);
+assert.equal((await call("/api/app/link", { method: "POST", body: { challenge: "short" }, cookie: A.cookie })).status, 400);
+let code = await link(A.cookie);
+assert.equal((await trade({ code, verifier: "w".repeat(43) })).status, 401); // wrong verifier, and the code is spent
+assert.equal((await trade({ code, verifier })).status, 401);
+code = await link(A.cookie);
+const { token } = await (await trade({ code, verifier })).json();
+assert.match(token, /^[0-9a-f]{64}$/);
+assert.equal((await trade({ code, verifier })).status, 401); // one use
+const bearer = { authorization: `Bearer ${token}` };
+assert.equal((await (await call("/api/me", { headers: bearer })).json()).user.email, "a@b.c");
+assert.equal(await (await call("/api/download", { headers: bearer })).text(), "dmgbytes");
+const appPost = path => w.fetch(new Request(O + path, { method: "POST", body: "{}", headers: { "content-type": "application/json", ...bearer } }), env);
+assert.equal((await appPost("/api/account/delete")).status, 403); // the app's session cannot change the account
+assert.equal((await appPost("/api/app/link")).status, 403);
+assert.equal(env.ACCOUNTS.m.has("user:dev:a@b.c"), true);
+const { token: t2 } = await (await trade({ code: await link(A.cookie), verifier })).json();
+r = await w.fetch(new Request(O + "/api/auth/signout", { method: "POST", body: "{}", headers: { "content-type": "application/json", authorization: `Bearer ${t2}` } }), env);
+assert.equal(r.status, 200);
+assert.equal((await call("/api/me", { headers: { authorization: `Bearer ${t2}` } })).status, 401);
 
 // download gate
 assert.equal((await call("/api/download")).status, 401);
@@ -111,6 +137,7 @@ assert.equal(env.ACCOUNTS.m.has("user:dev:a@b.c"), false);
 assert.deepEqual(JSON.parse(env.LICENCES.m.get(`key:${key}`)), { txn, status: "active" });
 assert.equal(env.LICENCES.m.has(`owner:${key}`), false);
 assert.equal((await call("/api/me", { cookie: A.cookie })).status, 401);
+assert.equal((await call("/api/me", { headers: bearer })).status, 401); // the app's session dies with the account
 assert.equal((await claim(B.cookie)).status, 200); // free to claim again
 // the same person signing in again gets a new account: the cookie from before the delete stays dead
 await new Promise(r => setTimeout(r, 5));
