@@ -3466,7 +3466,7 @@ struct DeskBrowserPage: View {
                 .disabled(duo)
                 TextField("홈 주소", text: $deskURL, prompt: Text("비어 있음"))
             } footer: {
-                Text("바탕화면 전체를 클릭하고 입력할 수 있는 브라우저로 바꿉니다. 다른 창들 뒤에 깔려 있고, 창을 치우면(데스크톱 보기) 바로 쓸 수 있습니다. 트랙패드를 네 손가락으로 쓸어내리면 데스크톱이 보이고, 그 상태에서 한 번 더 쓸어내리면 주소창이 나옵니다. 네 손가락으로 쓸어올리면 주소창이 들어가고, 한 번 더 쓸어올리면 창들이 다시 돌아옵니다. 바탕화면 아이콘은 가려집니다. 처음에는 홈 주소로 열리고(홈 주소가 비어 있으면 배경화면이 보이는 빈 페이지), 그 뒤로는 데스크톱마다 마지막에 열어 둔 탭이 다시 열립니다. 새 탭도 홈 주소로 열립니다. 집 버튼을 누르면 홈 주소로 갑니다. 주소창에는 주소나 검색어를 넣고(북마크가 먼저, 빈 탭에서는 북마크 목록), ⌘L 주소창 · ⌘R 새로고침 · ⌘[ ⌘] 뒤로/앞으로 · ⌘T ⌘W 탭 · ⌘⇧T 닫은 탭 다시 열기 · ⌘D 북마크 · ⌘F 찾기 · ⌘P 프린트를 쓸 수 있습니다. ⌘를 누른 채 링크를 클릭하면 뒤쪽 새 탭에서 열립니다.")
+                Text("바탕화면 전체를 클릭하고 입력할 수 있는 브라우저로 바꿉니다. 다른 창들 뒤에 깔려 있고, 창을 치우면(데스크톱 보기) 바로 쓸 수 있습니다. 트랙패드를 네 손가락으로 쓸어내리면 데스크톱이 보이고, 그 상태에서 한 번 더 쓸어내리거나 노치에 커서를 올리면 노치가 아래로 펼쳐져 탭과 주소창이 나옵니다(노치가 없는 화면에서는 화면 위쪽에 주소창이 내려옵니다). 네 손가락으로 쓸어올리면 주소창이 들어가고, 한 번 더 쓸어올리면 창들이 다시 돌아옵니다. 바탕화면 아이콘은 가려집니다. 처음에는 홈 주소로 열리고(홈 주소가 비어 있으면 배경화면이 보이는 빈 페이지), 그 뒤로는 데스크톱마다 마지막에 열어 둔 탭이 다시 열립니다. 새 탭도 홈 주소로 열립니다. 주소창에 home(또는 홈)이라고 넣으면 홈 주소로 갑니다(아이폰 듀오 모드에서는 집 버튼도 있습니다). 주소창에는 주소나 검색어를 넣고(북마크가 먼저, 빈 탭에서는 북마크 목록), ⌘L 주소창 · ⌘R 새로고침 · ⌘[ ⌘] 뒤로/앞으로 · ⌘T 새 탭 · ⌘W 또는 ⌘Q 탭 닫기 · ⌘⇧T 닫은 탭 다시 열기 · ⌘D 북마크 · ⌘F 찾기 · ⌘P 프린트를 쓸 수 있습니다. ⌘를 누른 채 링크를 클릭하면 뒤쪽 새 탭에서 열립니다.")
             }
             Section {
                 Toggle(isOn: $through) {
@@ -4035,6 +4035,15 @@ func selfCheck() {
     var lineBuffer = Data()
     assert(NowPlaying.lines(Data("a\nb\nc".utf8), into: &lineBuffer) == [Data("a".utf8), Data("b".utf8)] && lineBuffer == Data("c".utf8)
            && NowPlaying.lines(Data("d\n".utf8), into: &lineBuffer) == [Data("cd".utf8)] && lineBuffer.isEmpty, "the stream splits on newlines and keeps the unfinished line")
+    assert(DeskBrowser.site(URL(string: "https://www.apple.com/kr/")) == "apple.com" && DeskBrowser.site(URL(string: "https://andeville.app")) == "andeville.app"
+           && DeskBrowser.site(nil).isEmpty, "the notch's front tab names the site as Safari does, without www.")
+    assert(DuoTabStrip.pulls(pulled: 0, dx: -3, at: 66, end: 66) && !DuoTabStrip.pulls(pulled: 0, dx: -3, at: 40, end: 66) && !DuoTabStrip.pulls(pulled: 0, dx: 3, at: 66, end: 66)
+           && DuoTabStrip.pulls(pulled: 10, dx: 3, at: 66, end: 66) && DuoTabStrip.pulls(pulled: 0, dx: -3, at: 0, end: 0),
+           "two fingers pull the + in only on past the last tab, and then until they come back")
+    let under = DuoTabStrip.covered(NSRect(x: 100, y: 0, width: 36, height: 44), by: [NSRect(x: 76, y: 0, width: 36, height: 44), NSRect(x: 124, y: 0, width: 36, height: 44), NSRect(x: 200, y: 0, width: 36, height: 44)])
+    assert(under.left == 12 && under.right == 12, "a tab fades by how far its neighbours lie over it, from either side")
+    assert(DeskWindow.shortcutKey("W", code: 13) == "w" && DeskWindow.shortcutKey("ㅈ", code: 13) == "w" && DeskWindow.shortcutKey("ㅂ", code: 12) == "q"
+           && DeskWindow.shortcutKey("{", code: 33) == "{" && DeskWindow.shortcutKey(nil, code: 13) == nil, "a ⌘ shortcut is told by its key under a Korean input source too")
     let h = 3600.0
     assert(Trial.add(to: 5, last: 100, now: 102) == 7 && Trial.add(to: 5, last: 100, now: 100 + 8 * h) == 15 && Trial.add(to: 5, last: 100, now: 50) == 5
            && Trial.left(used: 0) == 11 * h && Trial.left(used: 11 * h - 1) == 1 && Trial.left(used: 11 * h) == 0 && Trial.left(used: 99 * h) == 0,
@@ -4945,7 +4954,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Full screen with 전체 화면에서 메뉴 막대와 노치 숨기기 on, or the Duo style (its menu bar hidden, `DuoMenuBarPin`):
     /// the cursor is kept off the top edge, so macOS's menu bar never slides down. ⌘ held lets it through.
     private func keepOffMenuBar() {
-        let duo = DuoMenu.shared.on
+        let duo = DuoMenu.shared.duo
         guard duo || (live.fullScreen && Store.fullScreenHide), !NSEvent.modifierFlags.contains(.command), let screen = notchScreen() else { return }
         let p = NSEvent.mouseLocation, f = screen.frame
         guard p.x >= f.minX, p.x < f.maxX, f.maxY - p.y < 1 else { return }
@@ -5908,6 +5917,12 @@ final class DeskBrowser {
         return ["home", "홈"].contains(w) ? home : nil
     }
 
+    /// A page's name in the notch island's front tab, as Safari's compact tab has it: the host, without "www.".
+    static func site(_ u: URL?) -> String {
+        let h = u?.host ?? ""
+        return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+    }
+
     /// What the address bar opens for what was typed: a shortcut first, then as `address`.
     static func normalize(_ input: String) -> URL? { shortcut(input, in: shortcuts, home: home) ?? address(input) }
 
@@ -6132,7 +6147,7 @@ final class DeskBrowser {
         // has its own window, and the last one made used to win, often a blank tab on another Space.
         let notch = notchScreen()?.frame
         DuoMenu.shared.page = frames.values.joined().first { $0.window.isOnActiveSpace && $0.window.frame == notch && $0.onNotchScreen }
-        DuoMenu.shared.set(on: on && shownDuo)
+        DuoMenu.shared.set(on: on, duo: shownDuo) // The island is the desk browser's, in either screen mode.
         DuoPad.shared.set(on: on && shownDuo)
         for sc in NSScreen.screens {
             let id = sc.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0, here = Desktops.current(sc)
@@ -6320,10 +6335,20 @@ private final class DeskWindow: NSWindow {
         Self.keyEquivalent(e, from: self, onCommand) ?? super.performKeyEquivalent(with: e)
     }
 
+    /// The key of a ⌘ press as the shortcuts name it. An input source such as Korean can read the W key as "ㅈ":
+    /// then the key's place on the keyboard says which it is.
+    /// ponytail: the places of the keys the shortcuts use, on an ANSI keyboard; add a key here when a shortcut is added.
+    static func shortcutKey(_ typed: String?, code: UInt16) -> String? {
+        guard let k = typed?.lowercased() else { return nil }
+        if k.unicodeScalars.allSatisfy(\.isASCII) { return k }
+        return [0: "a", 1: "s", 2: "d", 3: "f", 5: "g", 6: "z", 7: "x", 8: "c", 9: "v", 12: "q", 13: "w", 15: "r", 17: "t", 35: "p",
+                37: "l", 33: "[", 30: "]", 24: "=", 27: "-", 29: "0"][code] ?? k
+    }
+
     /// The edit keys, then the browser's; nil when it is neither. Also the notch island's, whose field is the page's address.
     static func keyEquivalent(_ e: NSEvent, from sender: Any?, _ onCommand: ((String, Bool) -> Bool)?) -> Bool? {
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard flags.subtracting(.shift) == .command, let k = e.charactersIgnoringModifiers?.lowercased() else { return nil }
+        guard flags.subtracting(.shift) == .command, let k = shortcutKey(e.charactersIgnoringModifiers, code: e.keyCode) else { return nil }
         let shift = flags.contains(.shift)
         let edit = ["c": #selector(NSText.copy(_:)), "v": #selector(NSText.paste(_:)), "x": #selector(NSText.cut(_:)),
                     "a": #selector(NSText.selectAll(_:)), "z": Selector(shift ? "redo:" : "undo:")]
@@ -7133,6 +7158,14 @@ struct DeskSidebar: View {
     }
 }
 
+/// The address field: no focus ring, in the notch island's tab either, where Safari's bar gives the view with the
+/// keyboard a ring of its own whatever `focusRingType` says.
+private final class DeskField: NSTextField {
+    override var focusRingMaskBounds: NSRect { .zero }
+    override func drawFocusRingMask() {}
+    @objc func safari_shouldDisableAutomaticFocusRing() -> Bool { true }
+}
+
 private final class DeskTab {
     let web: WKWebView
     var icon: NSImage?
@@ -7152,12 +7185,12 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
     fileprivate func keepDrawing() {
         let key = Selector(("_setWindowOcclusionDetectionEnabled:"))
         for t in tabs where t.web.responds(to: key) {
-            t.web.setValue(!(onNotchScreen && (onShow || t.web.isLoading)), forKey: "windowOcclusionDetectionEnabled") // KVC finds the _set… setter.
+            t.web.setValue(!(duo && onNotchScreen && (onShow || t.web.isLoading)), forKey: "windowOcclusionDetectionEnabled") // KVC finds the _set… setter.
         }
     }
     /// macOS's menu bar was showing over this desk at the last look (`DeskBrowser.start`).
     var menuBarShown = false
-    let field = NSTextField()
+    let field: NSTextField = DeskField()
     private var tabs: [DeskTab] = []
     private var current = 0
     var web: WKWebView { tabs[current].web }
@@ -7170,9 +7203,10 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
     private var bandPage: URL?
     /// Behind macOS's menu bar when it shows: a shade the menu's titles read against (`readTop`).
     private let menuShade = DeskMenuShade()
-    /// The pull-down bar (four fingers down, ⌘L): the address, then the tabs, or suggestions while typing.
+    /// The pull-down bar (four fingers down, ⌘L) of a screen without a notch: the address, then the tabs, or
+    /// suggestions while typing. On the notch screen the island has the address and the tabs, and this only drops the suggestions.
     private let addressBar = NSVisualEffectView()
-    private var barRow = NSView()
+    private let barRow = NSView()
     private let tabStrip = NSView()
     private let suggestionBox = NSView()
     private var suggestions: [DeskHistory.Entry] = []
@@ -7185,12 +7219,11 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
     private var downloads: [WKDownload: URL] = [:]
     /// ⌘⇧T brings these back, last closed first.
     private var closed: [URL] = []
-    private var star: NSButton?
     /// Safari's sidebar: this desktop's tabs, then the bookmarks. ⌘⇧L, the bar's sidebar button or the tabs button.
     private let sidebar = NSVisualEffectView()
     private let sidebarHost = NSHostingView(rootView: DeskSidebar())
     /// The field is in the notch island, not in the pull-down bar (`DuoMenu.page`): the bar only drops the suggestions.
-    private var docked: Bool { field.window != nil && field.window !== window }
+    private var docked: Bool { field.superview === DuoMenu.shared.slot.fieldHost }
     /// Where this desktop's tabs are kept between launches: its screen, and the desktop's place among that screen's.
     var sessionKey: String? { didSet { restore() } }
     /// The band at the top the page scrolls under (the notch's, or the menu bar's).
@@ -7198,6 +7231,8 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
     /// Where the page itself starts: below the band, or (메뉴 막대까지 뚫기) at the very top, under the menu bar.
     private var pageInset: CGFloat { UserDefaults.standard.bool(forKey: DeskBrowser.throughKey) ? 0 : topInset }
     let onNotchScreen: Bool
+    /// The Duo style: its rail's ink is read off this page (`keepDrawing`).
+    private let duo: Bool
     /// The page's prefers-color-scheme follows the system theme, live (a desktop-level window misses the change otherwise).
     private var theme: NSKeyValueObservation?
     private var tintColor: () -> Void = {}
@@ -7206,7 +7241,8 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
         let r = screen.frame // The whole screen, up to the notch.
         window = DeskWindow(contentRect: r, styleMask: .borderless, backing: .buffered, defer: false)
         topInset = screen.safeAreaInsets.top > 0 ? notchSize(of: screen).height : screen.frame.maxY - screen.visibleFrame.maxY
-        onNotchScreen = duo && screen == notchScreen()
+        onNotchScreen = screen == notchScreen() // Its address and tabs are the notch island's (`DuoMenu`), in either screen mode.
+        self.duo = duo
         super.init()
         window.isReleasedWhenClosed = false
         // Two over the desktop icons, not one: at one the window server's own strip for the menu bar (its "underbelly"
@@ -7249,25 +7285,16 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
         menuShade.autoresizingMask = [.width, .minYMargin]
         [pageHost, homeView, menuShade, progress].forEach(root.addSubview)
 
-        if duo {
-            // Duo: the page fills the screen, the address in the pull-down bar. The rail on the right (wifi, a vertical
-            // dock, the buttons) is not the page's: it floats over every app (`DuoPad`).
-            field.isBordered = false // Just the text; the buttons are in `DuoPad`.
-            field.drawsBackground = false
-            field.focusRingType = .none
-            field.font = .systemFont(ofSize: 15)
-            field.frame = NSRect(x: 16, y: 12, width: 0, height: 20)
-            field.autoresizingMask = [.width]
-            barRow.addSubview(field)
-        } else {
-            let row = NSStackView(views: [
-                button("chevron.left", #selector(back)), button("chevron.right", #selector(forward)),
-                button("arrow.clockwise", #selector(reload)), field, button("star", #selector(toggleBookmark)), button("house", #selector(home)),
-            ])
-            star = row.views[4] as? NSButton
-            row.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
-            barRow = row
-        }
+        // Just the text: on the notch screen it is lent to the notch island (`DuoMenu.dock`), on a screen without a
+        // notch it stays in the pull-down bar. No buttons here: keys (⌘[ ⌘] ⌘R), the island's reload, and in the Duo
+        // style the rail (`DuoPad`).
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 15)
+        field.frame = NSRect(x: 16, y: 12, width: 0, height: 20)
+        field.autoresizingMask = [.width]
+        barRow.addSubview(field)
         addressBar.material = .hudWindow
         addressBar.blendingMode = .withinWindow
         addressBar.state = .active
@@ -7306,7 +7333,7 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
         toast.autoresizingMask = [.minXMargin, .maxXMargin]
         root.addSubview(toast)
         window.contentView = root
-        if duo { field.frame.size.width = addressBar.frame.width - 32 }
+        field.frame.size.width = addressBar.frame.width - 32
 
         loadHome(screen)
         newTab()
@@ -7363,7 +7390,7 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
         case ("l", false): revealAddress()
         case ("l", true): toggleSidebar()
         case ("t", false): openHome(in: newTab()); revealAddress()
-        case ("w", false): closeTab(current)
+        case ("w", false), ("q", false): closeTab(current) // ⌘Q as well: on the desk it closes what is in front, not Andeville.
         case ("r", false): web.reload()
         case ("[", false): web.goBack()
         case ("]", false): web.goForward()
@@ -7445,7 +7472,7 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
         if addressBar.isHidden { window.makeFirstResponder(web) }
         updateProgress()
         refreshTabs()
-        refreshStar()
+        refreshSidebar()
         saveSession()
     }
 
@@ -7470,14 +7497,9 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
     @objc private func toggleBookmark() {
         guard let u = web.url, ["http", "https"].contains(u.scheme) else { return NSSound.beep() }
         showToast(DeskBookmarks.toggle(url: u.absoluteString, title: web.title ?? "") ? "북마크에 추가했습니다" : "북마크에서 뺐습니다")
-        refreshStar()
-    }
-
-    private func refreshStar() {
-        let kept = web.url.map { DeskBookmarks.has($0.absoluteString) } ?? false
-        star?.image = NSImage(systemSymbolName: kept ? "star.fill" : "star", accessibilityDescription: "북마크")
         refreshSidebar()
     }
+
 
     func toggleSidebar() {
         let show = sidebar.isHidden
@@ -7533,7 +7555,10 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
     private func refreshTabs() {
         if DuoMenu.shared.page === self { DuoMenu.shared.tabStrip.show(tabList, current: current) }
         // Not typed in: the site's name, as Safari's compact tab shows it; the whole address once it is (revealAddress).
-        if !finding, field.currentEditor() == nil { field.stringValue = web.url?.host ?? "" }
+        if !finding, field.currentEditor() == nil {
+            field.stringValue = DeskBrowser.site(web.url)
+            if docked { DuoMenu.shared.slot.needsLayout = true } // As wide as the name.
+        }
         tabStrip.subviews.forEach { $0.removeFromSuperview() }
         let gap: CGFloat = 4, plus: CGFloat = 26, n = CGFloat(tabs.count)
         let w = max(60, min(200, (tabStrip.bounds.width - plus - gap * n) / n))
@@ -7573,8 +7598,10 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
     /// Sizes the bar: the address row on top, then the tabs, or the suggestions while there are any.
     private func layoutBar() {
         guard let root = window.contentView else { return }
-        if docked, let slot = field.superview?.superview, let cover = slot.window {
-            // Just the suggestions, dropped from under the address in the notch island.
+        if docked {
+            // Just the suggestions, dropped from under the address in the notch island (not while Safari's bar has
+            // the address out of the window, `showBar`).
+            guard let slot = field.superview?.superview, let cover = slot.window else { return }
             let s = cover.convertToScreen(slot.convert(slot.bounds, to: nil))
             let w = max(s.width, 360), list = CGFloat(suggestions.count) * 28 + 4, h = list + 8
             addressBar.frame = NSRect(x: s.midX - w / 2 - window.frame.minX, y: s.minY - window.frame.minY - 16 - h, width: w, height: h)
@@ -7647,11 +7674,19 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
     private func showBar() {
         NSApp.activate(ignoringOtherApps: true) // Andeville is an accessory app: typing needs it in front.
         if docked, let cover = field.window {
+            let address = field.stringValue
             DuoMenu.shared.typing = true // First: the bar's panel takes the keyboard only while typed in.
-            cover.makeKeyAndOrderFront(nil)
-            cover.makeFirstResponder(field)
-            field.selectText(nil)
             setSuggestions([])
+            // The other tabs leave the island for the address (`DuoTabStrip.show`), and the address is out of the
+            // window while they do: the cursor goes in once it is back.
+            DuoMenu.shared.slot.placed { [weak self] in
+                guard let self, DuoMenu.shared.typing else { return }
+                if self.field.currentEditor() == nil { self.field.stringValue = address } // A page's new title meanwhile put its name back.
+                cover.makeKeyAndOrderFront(nil)
+                cover.makeFirstResponder(self.field)
+                self.field.selectText(nil)
+                self.layoutBar() // The suggestions, under where the address now is.
+            }
             return
         }
         window.makeKeyAndOrderFront(nil)
@@ -7665,12 +7700,14 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
         field.selectText(nil)
     }
 
-    private func hideAddress() {
+    fileprivate func hideAddress() {
         finding = false
         setSuggestions([])
         if docked {
             field.window?.makeFirstResponder(nil) // The cover's own: the field stops editing there, not only here.
             DuoMenu.shared.typing = false
+            field.stringValue = DeskBrowser.site(web.url) // At once, not after `controlTextDidEndEditing`'s wait.
+            DuoMenu.shared.slot.needsLayout = true
             window.makeKeyAndOrderFront(nil)
             window.makeFirstResponder(web)
             return
@@ -7699,7 +7736,8 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             guard let self, self.field.currentEditor() == nil else { return }
             self.setSuggestions([])
-            self.field.stringValue = self.web.url?.host ?? ""
+            self.field.stringValue = DeskBrowser.site(self.web.url)
+            DuoMenu.shared.slot.needsLayout = true
             DuoMenu.shared.typing = false
         }
     }
@@ -7742,12 +7780,6 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
     }
 
     // MARK: Buttons
-
-    private func button(_ symbol: String, _ action: Selector) -> NSButton {
-        let b = FirstClickButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!, target: self, action: action)
-        b.bezelStyle = .texturedRounded
-        return b
-    }
 
     func press(_ a: DuoPad.Action) {
         switch a {
@@ -7810,7 +7842,7 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
         guard w === web else { return }
         if !finding, field.currentEditor() == nil { field.stringValue = w.url?.host ?? "" } // The site's name, as Safari's compact tab.
         homeView.isHidden = true
-        refreshStar()
+        refreshSidebar()
         saveSession()
     }
 
@@ -8070,11 +8102,14 @@ final class DuoTone: ObservableObject {
     }
 }
 
-/// The Duo style's notch: while the desk page is in front it grows down into an island holding the page's tabs,
-/// Safari's own, the address in the front one. macOS's menu bar stays hidden meanwhile (`DuoMenuBarPin`).
+/// The desk browser's notch: while the desk page is in front it grows down into an island holding the page's tabs,
+/// Safari's own, the address in the front one. In either screen mode; in the Duo style macOS's menu bar stays
+/// hidden meanwhile (`DuoMenuBarPin`), otherwise the open island lies over the menu bar's middle.
 final class DuoMenu: ObservableObject {
     static let shared = DuoMenu()
     private(set) var on = false
+    /// The Duo style is on as well: the menu bar is hidden and the rail's ink is read off the page.
+    private(set) var duo = false
     /// Out of the notch: while the desk page is in front, the notch grows down into an island holding its tabs (`tabStrip`).
     private var bottom: NSPanel?
     /// The notch island is open (`DuoNotchTabs` follows it).
@@ -8086,7 +8121,16 @@ final class DuoMenu: ObservableObject {
     /// The page's tabs in Safari's own tab bar, compact: the address (`slot`) is the tab in front, as in Safari.
     let tabStrip = DuoTabStrip()
     /// The address is being typed in (`DeskFrame.showBar` until its field lets go).
-    var typing = false { didSet { updateSlot() } }
+    var typing = false {
+        didSet {
+            if typing != oldValue {
+                slot.typing = typing
+                // Typed in, the address has the whole island, as Safari's compact tab does (`DuoTabStrip.show`).
+                if let page { tabStrip.show(page.tabList, current: page.currentTab) }
+            }
+            updateSlot()
+        }
+    }
     private var toner: Timer?, deskWatch: AnyCancellable?
     private var letGo: [Any] = []
     private weak var islandShape: DuoNotchTabs?
@@ -8142,14 +8186,34 @@ final class DuoMenu: ObservableObject {
                  NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { away($0); return $0 } as Any]
     }
 
+    /// Two fingers sideways on the island. Typed in, the address lets go at once and the tabs are back for the swipe
+    /// to move; on past the last tab, the swipe pulls a + in (`DuoTabStrip.pull`). True when the swipe is not the tab bar's.
+    func swiped(_ e: NSEvent) -> Bool {
+        let sideways = abs(e.scrollingDeltaX) > abs(e.scrollingDeltaY), over = e.phase.contains(.ended) || e.phase.contains(.cancelled)
+        guard sideways || over else { return false }
+        if e.phase.contains(.began) { letGoBySwipe = false }
+        if typing, sideways {
+            page?.hideAddress()
+            letGoBySwipe = true
+        }
+        // The swipe that let the address go moves the tabs, and stops there: it does not go on to pull a new tab in.
+        if letGoBySwipe {
+            if over { letGoBySwipe = false }
+            return false
+        }
+        return tabStrip.pull(e)
+    }
+    private var letGoBySwipe = false
+
     /// Lends the page's field to the bar. A page on another desktop gets it back when it is on show again.
     private func dock() {
         guard let f = page?.field, f.superview !== slot.fieldHost else { return }
         slot.fieldHost.subviews.forEach { $0.removeFromSuperview() }
         f.removeFromSuperview()
         f.autoresizingMask = []
+        f.font = .systemFont(ofSize: 13) // The tabs' own size.
         slot.fieldHost.addSubview(f)
-        slot.needsLayout = true
+        slot.refresh()
     }
 
     /// The notch opens into its tabs while the desk page is in front (or its address is typed in).
@@ -8160,12 +8224,14 @@ final class DuoMenu: ObservableObject {
         let tabs = on && (typing || (DuoPad.shared.desk && !letGone))
         guard tabs != tabsShown else { return }
         tabsShown = tabs
+        if !tabs { slot.rest(); tabStrip.rest() }
         islandShape?.set(open: tabs)
         bottom.ignoresMouseEvents = !tabs
     }
 
-    func set(on: Bool) {
+    func set(on: Bool, duo: Bool) {
         self.on = on
+        self.duo = on && duo
         bottom?.orderOut(nil)
         bottom = nil
         toner?.invalidate()
@@ -8183,6 +8249,7 @@ final class DuoMenu: ObservableObject {
         b.backgroundColor = .clear
         b.hasShadow = false
         b.ignoresMouseEvents = true
+        b.isMovable = false // Safari's tab bar drags its window by the room between tabs: the island left the notch.
         b.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 2) // Over the menu bar, under the notch's own shape (NotchBase).
         b.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         let island = DuoNotchTabs(notch: notch.size, open: open)
@@ -8200,6 +8267,7 @@ final class DuoMenu: ObservableObject {
         tabsShown = false
         if let page { tabStrip.show(page.tabList, current: page.currentTab) } // The bar is in a window now: its buttons can be made.
         updateSlot()
+        guard duo else { return } // The ink is the rail's.
         // Under other windows WebKit stops drawing the page and the ink would read it stale; keep it drawing (WebKit's
         // own switch, not public API, hence the check).
         let keepDrawing = Selector(("_setWindowOcclusionDetectionEnabled:"))
@@ -8218,6 +8286,14 @@ final class DuoNotchBar: NSPanel {
         DeskWindow.keyEquivalent(e, from: self) { DuoMenu.shared.page?.window.onCommand?($0, $1) ?? false } ?? super.performKeyEquivalent(with: e)
     }
     override func constrainFrameRect(_ r: NSRect, to screen: NSScreen?) -> NSRect { r } // Up in the menu bar, where it is put.
+    /// Two fingers on the island go by `DuoMenu.swiped` first; what it leaves is the tab bar's, whose tabs then
+    /// tuck under one another anew (`DuoTabStrip.soften`).
+    override func sendEvent(_ e: NSEvent) {
+        guard e.type == .scrollWheel else { return super.sendEvent(e) }
+        if DuoMenu.shared.swiped(e) { return }
+        super.sendEvent(e)
+        DuoMenu.shared.tabStrip.soften()
+    }
 }
 
 /// The notch island's shape: the notch grown down round the tabs. On a layer, its spring worked out ahead into
@@ -8328,17 +8404,27 @@ final class DuoNotchTabs: NSView {
     }
 }
 
-/// The front tab in the notch island, as Safari's compact tab: the notch page's address, a magnifier before it and
-/// reload at its end, on the tab's own glass. The field itself is the page's own (`DeskFrame.field`), lent to the bar
-/// (`DuoMenu.page`), so typing, suggestions, ⌘F and Escape work as in the pull-down bar.
+/// The front tab in the notch island, as Safari's compact tab. At rest: the page's icon, the site's name in the
+/// middle (cut short with an ellipsis), and reload only under the cursor. Typed in: the magnifier and the whole
+/// address from the left, the island to itself (`DuoTabStrip.show`). The field itself is the page's own
+/// (`DeskFrame.field`), lent to the bar (`DuoMenu.page`), so typing, suggestions, ⌘F and Escape work as in the pull-down bar.
 final class DuoAddressSlot: NSView {
     let fieldHost = NSView()
-    private let glyph = NSImageView(image: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)!)
+    private let glyph = NSImageView()
     private let reload = NSButton()
+    private let magnifier = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)!
+    /// The page's icon; the magnifier stands in while typed in, and on a page without one.
+    var icon: NSImage? { didSet { refresh() } }
+    /// The address is being typed in (`DuoMenu.typing`, which this cannot ask: the slot is made with it).
+    var typing = false { didSet { refresh() } }
+    private var hovered = false { didSet { refresh() } }
+    /// The island folded: the cursor is off it, whether or not its leaving was told (a folded island takes no mouse events).
+    func rest() { if hovered { hovered = false } }
 
     init() {
         super.init(frame: .zero)
         glyph.contentTintColor = .secondaryLabelColor
+        glyph.imageScaling = .scaleProportionallyUpOrDown
         reload.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "새로고침")
         reload.isBordered = false
         reload.contentTintColor = .secondaryLabelColor
@@ -8346,15 +8432,48 @@ final class DuoAddressSlot: NSView {
         reload.action = #selector(reloadPage)
         reload.toolTip = "새로고침"
         [glyph, fieldHost, reload].forEach(addSubview)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        refresh()
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// Safari's bar takes the slot out of the window while it lays its tabs out again (as typing starts, the other
+    /// tabs leaving): what needs it in a window, the cursor in its field, waits for it to be back.
+    func placed(_ then: @escaping () -> Void) { if window != nil { then() } else { whenPlaced = then } }
+    private var whenPlaced: (() -> Void)?
+    override func viewDidMoveToWindow() {
+        guard window != nil, let then = whenPlaced else { return }
+        whenPlaced = nil
+        DispatchQueue.main.async(execute: then) // Once the bar is done with this pass.
+    }
+    override func mouseEntered(with e: NSEvent) { hovered = true }
+    override func mouseExited(with e: NSEvent) { hovered = false }
+
+    func refresh() {
+        glyph.image = typing ? magnifier : icon ?? magnifier
+        reload.isHidden = typing || !hovered
+        if let f = fieldHost.subviews.first as? NSTextField {
+            f.cell?.isScrollable = typing // Typed in it scrolls sideways; at rest a long name ends in an ellipsis.
+            f.cell?.lineBreakMode = typing ? .byClipping : .byTruncatingTail
+            f.needsDisplay = true
+        }
+        needsLayout = true
+    }
 
     override func layout() {
         super.layout()
         let h = bounds.height
-        glyph.frame = NSRect(x: 10, y: (h - 16) / 2, width: 16, height: 16)
-        reload.frame = NSRect(x: bounds.width - 30, y: (h - 20) / 2, width: 20, height: 20)
-        fieldHost.frame = NSRect(x: 32, y: (h - 20) / 2, width: max(bounds.width - 32 - 34, 0), height: 20)
+        reload.frame = NSRect(x: bounds.width - 28, y: (h - 20) / 2, width: 20, height: 20)
+        // Typed in: the magnifier, then the address up to the tab's end. At rest: the icon and the name as one group in
+        // the tab's middle, the name as wide as it is, up to the room there is (less reload's while it shows).
+        var x: CGFloat = 10, w = max(bounds.width - 42, 0)
+        if !typing {
+            let room = max(bounds.width - 42 - (hovered ? 24 : 0), 0)
+            w = min(ceil((fieldHost.subviews.first as? NSTextField)?.cell?.cellSize.width ?? room), room)
+            x = max(10, min((bounds.width - 22 - w) / 2, bounds.width - (hovered ? 34 : 10) - 22 - w))
+        }
+        glyph.frame = NSRect(x: x, y: (h - 16) / 2, width: 16, height: 16)
+        fieldHost.frame = NSRect(x: x + 22, y: (h - 20) / 2, width: w, height: 20)
         fieldHost.subviews.forEach { $0.frame = fieldHost.bounds }
     }
 
@@ -8362,7 +8481,7 @@ final class DuoAddressSlot: NSView {
     /// field cannot take it itself: its panel is key only while typed in (`DuoNotchBar`).
     override func hitTest(_ p: NSPoint) -> NSView? {
         guard let hit = super.hitTest(p) else { return nil }
-        return DuoMenu.shared.typing || hit === reload ? hit : self
+        return typing || hit === reload ? hit : self
     }
     override func mouseDown(with e: NSEvent) { DuoMenu.shared.page?.revealAddress() }
     override func acceptsFirstMouse(for e: NSEvent?) -> Bool { true } // The first click types; the panel is never key before.
@@ -8387,24 +8506,131 @@ final class DuoTabStrip: NSView {
         return unsafeBitCast(imp, to: Init.self)(c.perform(NSSelectorFromString("alloc")).takeUnretainedValue(), sel, 0)
     }()
     private var items: [NSObject] = []
+    /// Safari's bar scrolls with a scroll view of its own, empty: where it is says how far along the tabs are.
+    private lazy var scroller: NSScrollView? = bar.flatMap { Self.first(NSScrollView.self, in: $0) }
+    /// How far two fingers have pushed on past the last tab, in points; `pullToAdd` of it and letting go opens a new tab.
+    private var pulled: CGFloat = 0
+    static let pullToAdd: CGFloat = 56
+    private let plus = NSImageView()
 
     init() {
         super.init(frame: .zero)
         guard let bar else { return }
         bar.setValue(self, forKey: "delegate")
+        wantsLayer = true
+        layer?.cornerRadius = Self.height / 2 // The bar's own ends: pushed aside for the +, it is cut off in its own shape.
+        layer?.masksToBounds = true
+        plus.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "새 탭")?.withSymbolConfiguration(.init(pointSize: 15, weight: .semibold))
+        plus.alphaValue = 0
+        addSubview(plus) // Under the bar, which moves off it.
         addSubview(bar)
         appearance = NSAppearance(named: .darkAqua) // On the island's black.
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    private static func first<T: NSView>(_ t: T.Type, in v: NSView) -> T? {
+        if let x = v as? T { return x }
+        for s in v.subviews { if let x = first(t, in: s) { return x } }
+        return nil
+    }
+
     override func layout() {
         super.layout()
-        bar?.frame = bounds
+        place()
+    }
+
+    /// The bar, pushed left by a pull past its end, and the + in the room that leaves: fainter until the pull is enough.
+    private func place() {
+        let shift = min(pulled, 96) * 0.6, enough = pulled >= Self.pullToAdd
+        bar?.frame = bounds.offsetBy(dx: -shift, dy: 0)
+        plus.frame = NSRect(x: bounds.width - max(shift, 28) / 2 - 10, y: (bounds.height - 20) / 2, width: 20, height: 20)
+        plus.alphaValue = enough ? 1 : min(pulled / Self.pullToAdd, 1) * 0.45
+        plus.contentTintColor = enough ? .white : .secondaryLabelColor
+    }
+
+    /// Two fingers pushing on past the last tab (as on the iPhone's Safari): the bar gives way, a + comes in at its
+    /// end, and letting go with the + lit opens a new tab. True while the swipe is the pull's, not the bar's.
+    func pull(_ e: NSEvent) -> Bool {
+        guard let s = scroller else { return false }
+        if e.phase.contains(.ended) || e.phase.contains(.cancelled) {
+            guard pulled > 0 else { return false }
+            let add = pulled >= Self.pullToAdd && e.phase.contains(.ended)
+            rest()
+            if add { DuoMenu.shared.page?.plusTab() }
+            return false // The bar hears the swipe end too.
+        }
+        guard !e.phase.isEmpty else { return false } // The glide after the fingers lift, or a mouse's wheel: the bar's.
+        let end = max(0, (s.documentView?.frame.width ?? 0) - s.contentView.bounds.width)
+        guard Self.pulls(pulled: pulled, dx: e.scrollingDeltaX, at: s.contentView.bounds.minX, end: end) else { return false }
+        pulled = max(0, pulled - e.scrollingDeltaX)
+        place()
+        return true
+    }
+
+    /// Whether a sideways move of `dx` (negative toward the last tab) is the pull's: one under way, or the tabs at their end and pushed on.
+    static func pulls(pulled: CGFloat, dx: CGFloat, at x: CGFloat, end: CGFloat) -> Bool { pulled > 0 || (dx < 0 && x >= end - 0.5) }
+
+    /// The pull let go, or the island folded: the bar slides back over the +.
+    func rest() {
+        guard pulled > 0 else { return }
+        pulled = 0
+        NSAnimationContext.runAnimationGroup { c in
+            c.duration = 0.25
+            c.allowsImplicitAnimation = true
+            place()
+        }
+    }
+
+    /// How far the tabs lying over a tab at `v` reach into it from either side (`over`: their frames).
+    static func covered(_ v: NSRect, by over: [NSRect]) -> (left: CGFloat, right: CGFloat) {
+        var left: CGFloat = 0, right: CGFloat = 0
+        for f in over where f.maxX > v.minX && f.minX < v.maxX {
+            if f.midX < v.midX { left = max(left, f.maxX - v.minX) } else { right = max(right, v.maxX - f.minX) }
+        }
+        return (left, right)
+    }
+
+    /// Safari's bar tucks tabs under their neighbours as they run out of room, each cut off at the edge of the one
+    /// over it. Here a tab's icon fades out toward that edge instead, and blurs as more of it is under.
+    /// ponytail: the blur is one strength over the whole icon, growing with how much is covered, not a blur that
+    /// itself grows across it; a variable blur (CAFilter "variableBlur" with a mask image) if that is wanted.
+    func soften() {
+        guard let bar else { return }
+        var buttons: [NSView] = []
+        func collect(_ v: NSView) { if v.className == "UnifiedTabBarButton" { buttons.append(v) } else { v.subviews.forEach(collect) } }
+        collect(bar)
+        let floating = { (v: NSView) in v.value(forKey: "floating") as? Bool == true }, z = { (v: NSView) in v.layer?.zPosition ?? 0 }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        for v in buttons where !floating(v) {
+            guard let icon = Self.first(NSImageView.self, in: v), let l = icon.layer else { continue }
+            // The front tab's glass is 3 in from its button's edge.
+            let over = buttons.filter { $0 !== v && z($0) > z(v) }.map { floating($0) ? $0.frame.insetBy(dx: 3, dy: 0) : $0.frame }
+            let c = Self.covered(v.frame, by: over)
+            guard c.left > 0 || c.right > 0 else { l.mask = nil; l.filters = nil; continue }
+            let r = icon.convert(icon.bounds, to: v), fade: CGFloat = 8, from = c.left, to = v.bounds.width - c.right
+            let at = { (x: CGFloat) in NSNumber(value: Double(min(1, max(0, (x - r.minX) / r.width)))) }
+            let g = (l.mask as? CAGradientLayer) ?? CAGradientLayer()
+            g.frame = l.bounds
+            (g.startPoint, g.endPoint) = (CGPoint(x: 0, y: 0.5), CGPoint(x: 1, y: 0.5))
+            let clear = NSColor.clear.cgColor, full = NSColor.black.cgColor
+            g.colors = [c.left > 0 ? clear : full, c.left > 0 ? clear : full, full, full, c.right > 0 ? clear : full, c.right > 0 ? clear : full]
+            let inL = c.left > 0 ? from + fade : 0 // Where the fade from the left is over; none without a tab over that side.
+            g.locations = [0, at(from), at(inL), at(max(inL, c.right > 0 ? to - fade : v.bounds.width)), at(max(inL, to)), 1]
+            l.mask = g
+            if let blur = (NSClassFromString("CAFilter") as? NSObject.Type)?.perform(NSSelectorFromString("filterWithType:"), with: "gaussianBlur")?.takeUnretainedValue() as? NSObject {
+                let under = max(c.left > 0 ? from - r.minX : 0, c.right > 0 ? r.maxX - to : 0) // How much of the icon is under the tab over it.
+                blur.setValue(min(1, max(0, under / r.width)) * 2.5, forKey: "inputRadius")
+                l.filters = [blur]
+            }
+        }
     }
 
     func show(_ tabs: [(title: String, icon: NSImage?)], current: Int) {
         guard let bar, bar.window != nil, let itemClass = NSClassFromString("UnifiedTabBarItem") as? NSObject.Type,
               let listClass = NSClassFromString("UnifiedTabBarItemList") as? NSObject.Type else { return }
+        DuoMenu.shared.slot.icon = tabs.indices.contains(current) ? tabs[current].icon : nil
         while items.count > tabs.count { items.removeLast() }
         while items.count < tabs.count { items.append(itemClass.init()) }
         for (item, tab) in zip(items, tabs) {
@@ -8413,9 +8639,14 @@ final class DuoTabStrip: NSView {
         }
         // The one in front first (read only: its ivar), then the list, whose setter lays the buttons out with it.
         if items.indices.contains(current) { bar.setValue(items[current], forKey: "activeTabBarItem") }
+        // Typed in, the address has the island to itself, as Safari's compact tab takes the bar: the other tabs are back after.
+        let shown = DuoMenu.shared.typing && items.indices.contains(current) ? [items[current]] : items
         let list = listClass.perform(NSSelectorFromString("alloc")).takeUnretainedValue()
-            .perform(NSSelectorFromString("initWithTabBarItems:"), with: items).takeUnretainedValue()
+            .perform(NSSelectorFromString("initWithTabBarItems:"), with: shown).takeUnretainedValue()
         bar.perform(NSSelectorFromString("setTabBarItemList:"), with: list)
+        soften()
+        // Again once Safari's bar has laid its tabs out and moved them there: it tells of neither.
+        for t in [0.1, 0.45] { DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self] in self?.soften() } }
     }
 
     private func index(_ item: Any?) -> Int? { items.firstIndex { $0 === item as AnyObject } }
@@ -8423,8 +8654,18 @@ final class DuoTabStrip: NSView {
     // UnifiedTabBarDelegate (Safari's private protocol; every required method is here, or a call to a missing one throws).
     @objc(unifiedTabBar:activateTabBarViewItem:) func activate(_ b: Any, _ item: Any) {
         guard let i = index(item), let page = DuoMenu.shared.page else { return }
-        if i == page.currentTab { page.revealAddress() } else { page.select(i) }
+        // Safari's bar tells of one press on another tab twice: as the button goes down (the tab comes in front) and
+        // again as it comes up, by when that tab is the front one. Only a press that began on the front tab types.
+        let press = NSApp.currentEvent.flatMap { [.leftMouseDown, .leftMouseUp].contains($0.type) ? $0.eventNumber : nil }
+        if i != page.currentTab {
+            movedBy = press
+            page.select(i)
+        } else if press == nil || press != movedBy {
+            page.revealAddress()
+        }
     }
+    /// The press (a button's down and up share a number) that last brought another tab in front.
+    private var movedBy: Int?
     @objc(unifiedTabBar:canCloseTabBarItem:) func canClose(_ b: Any, _ item: Any) -> Bool { true }
     @objc(unifiedTabBar:closeTabBarItem:) func close(_ b: Any, _ item: Any) { if let i = index(item) { DuoMenu.shared.page?.closeTab(i) } }
     @objc(unifiedTabBar:unifiedFieldForUnifiedTabBarItem:) func field(_ b: Any, _ item: Any) -> Any? {
@@ -8458,8 +8699,8 @@ final class DuoTabStrip: NSView {
     @objc(unifiedTabBar:didFinishTransitionAnimationForWindow:) func didFinish(_ b: Any, _ w: Any) {}
     @objc(unifiedTabBar:didMoveTabBarViewItems:toIndex:isChangingPinning:targetClusterID:isMovingCluster:) func didMove(_ b: Any, _ i: Any, _ x: UInt, _ p: Bool, _ c: Any?, _ m: Bool) -> Any? { nil }
     @objc(unifiedTabBar:didUpdateSelectedTabs:) func didUpdateSelected(_ b: Any, _ i: Any) {}
-    @objc(didFinishAnimatingButtonLayoutInUnifiedTabBar:) func didAnimate(_ b: Any) {}
-    @objc(unifiedTabBarDidUpdateLayout:) func didLayout(_ b: Any) {}
+    @objc(didFinishAnimatingButtonLayoutInUnifiedTabBar:) func didAnimate(_ b: Any) { soften() }
+    @objc(unifiedTabBarDidUpdateLayout:) func didLayout(_ b: Any) { soften() }
     @objc func unifiedTabBarResignFirstResponder() {}
     @objc(unifiedTabBarSidecarTouchDidTapAlreadyActiveTab:) func sidecarTap(_ b: Any) {}
     @objc(unifiedTabBarSidecarTouchInteractionDidChange:) func sidecarChange(_ b: Any) {}
