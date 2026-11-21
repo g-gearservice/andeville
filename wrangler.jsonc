@@ -28,7 +28,7 @@
   "vars": {
     "GOOGLE_CLIENT_ID": "423227577520-jaun81kq830onmtecrgqudicqj70j50m.apps.googleusercontent.com", // Google Cloud Console › OAuth client (Web); its JavaScript origins must list this site
     "PAY_URL": "https://andeville-pay.gearservice.workers.dev",
-    "DMG_KEY": "Andeville-0.3.2.dmg"
+    "DMG_KEY": "Andeville-0.3.3.dmg"
   },
   "env": {
     "production": {
@@ -47,7 +47,7 @@
       "vars": {
         "GOOGLE_CLIENT_ID": "423227577520-jaun81kq830onmtecrgqudicqj70j50m.apps.googleusercontent.com",
         "PAY_URL": "https://pay.andeville.app",
-        "DMG_KEY": "Andeville-0.3.2.dmg"
+        "DMG_KEY": "Andeville-0.3.3.dmg"
       }
     }
   }
