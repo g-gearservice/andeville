@@ -326,6 +326,7 @@
   "account.dev.submit": "테스트 로그인",
   "account.link.h": "앱 연결",
   "account.link.p": "Mac의 Andeville이 업데이트를 받기 위해 이 계정을 사용하려고 합니다. 방금 앱 안에서 로그인을 선택한 경우에만 연결하세요.",
+  "account.link.buy": "앱은 라이선스가 있는 계정에만 연결됩니다. 아래에서 Andeville을 구입한 다음 앱 안에서 로그인을 다시 선택하세요.",
   "account.link.b": "이 Mac 연결",
   "account.licence.h": "라이선스",
   "account.licence.none": "이 계정에는 아직 라이선스가 없습니다.",

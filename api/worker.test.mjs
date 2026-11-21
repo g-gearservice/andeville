@@ -97,6 +97,9 @@ const link = async c => (await (await call("/api/app/link", { method: "POST", bo
 const trade = b => w.fetch(new Request(O + "/api/app/token", { method: "POST", body: JSON.stringify(b), headers: { "content-type": "application/json" } }), env);
 assert.equal((await call("/api/app/link", { method: "POST", body: { challenge } })).status, 401);
 assert.equal((await call("/api/app/link", { method: "POST", body: { challenge: "short" }, cookie: A.cookie })).status, 400);
+r = await call("/api/app/link", { method: "POST", body: { challenge }, cookie: B.cookie }); // signed in on the site, but nothing bought: the app stays out
+assert.equal(r.status, 403);
+assert.deepEqual(await r.json(), { error: "no licence" });
 let code = await link(A.cookie);
 assert.equal((await trade({ code, verifier: "w".repeat(43) })).status, 401); // wrong verifier, and the code is spent
 assert.equal((await trade({ code, verifier })).status, 401);

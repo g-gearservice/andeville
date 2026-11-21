@@ -34,7 +34,7 @@
     $("ac-nolic").hidden = L.length > 0; $("ac-buy").hidden = L.length > 0;
     $("ac-dl").hidden = !(me.download && me.download.available); $("ac-copy").hidden = !L.length;
     $("ac-revoked").hidden = !(L.length && !ok);
-    $("ac-link").hidden = !app();
+    $("ac-link").hidden = !app(); $("ac-link-p").hidden = $("ac-link-b").hidden = !ok; $("ac-link-buy").hidden = ok; // the app is for accounts that paid
     show("ac-app");
   }
 

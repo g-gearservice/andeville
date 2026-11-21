@@ -93,7 +93,7 @@ export default {
       "GET /api/me": [env.ACCOUNTS, env.LICENCES], "GET /api/download": [env.ACCOUNTS, env.LICENCES, env.DOWNLOADS, env.DMG_KEY],
       "POST /api/auth/google": [env.ACCOUNTS], "POST /api/auth/dev": [env.ACCOUNTS], "POST /api/auth/signout": [env.ACCOUNTS],
       "POST /api/claim": [env.ACCOUNTS, env.LICENCES], "POST /api/account/delete": [env.ACCOUNTS, env.LICENCES],
-      "POST /api/app/link": [env.ACCOUNTS], "POST /api/app/token": [env.ACCOUNTS],
+      "POST /api/app/link": [env.ACCOUNTS, env.LICENCES], "POST /api/app/token": [env.ACCOUNTS],
     }[route];
 
     if (route === "GET /api/config")
@@ -171,6 +171,8 @@ export default {
 
     if (route === "POST /api/app/link") { // the signed-in page vouches for the app that sent the user here
       if (!/^[A-Za-z0-9_-]{43}$/.test(body.challenge ?? "")) return json({ error: "bad challenge" }, 400);
+      // Signing in inside the app is for accounts that paid; the site itself stays open, since buying needs an account.
+      if (!(await licences(env, user)).some(l => l.status === "active")) return json({ error: "no licence" }, 403);
       const code = hex(32);
       await env.ACCOUNTS.put(`link:${code}`, JSON.stringify({ sub: user.sub, created: user.created, challenge: body.challenge }), { expirationTtl: 300 });
       return json({ code });

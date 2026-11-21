@@ -326,6 +326,7 @@
   "account.dev.submit": "Test sign-in",
   "account.link.h": "Connect the app",
   "account.link.p": "Andeville on your Mac is asking to use this account for its updates. Connect it only if you just chose Sign in inside the app.",
+  "account.link.buy": "The app connects only to an account that holds a licence. Get Andeville below, then choose Sign in inside the app again.",
   "account.link.b": "Connect this Mac",
   "account.licence.h": "Licence",
   "account.licence.none": "There is no licence on this account yet.",

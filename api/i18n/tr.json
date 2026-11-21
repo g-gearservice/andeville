@@ -326,6 +326,7 @@
   "account.dev.submit": "Test girişi",
   "account.link.h": "Uygulamayı bağlayın",
   "account.link.p": "Mac’inizdeki Andeville, güncellemeleri için bu hesabı kullanmak istiyor. Yalnızca uygulamanın içinde az önce Giriş Yap’ı seçtiyseniz bağlayın.",
+  "account.link.buy": "Uygulama yalnızca lisansı olan bir hesaba bağlanır. Aşağıdan Andeville’i alın, ardından uygulamanın içinde yeniden Giriş Yap’ı seçin.",
   "account.link.b": "Bu Mac’i bağla",
   "account.licence.h": "Lisans",
   "account.licence.none": "Bu hesapta henüz bir lisans yok.",

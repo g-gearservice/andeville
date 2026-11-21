@@ -326,6 +326,7 @@
   "account.dev.submit": "测试登录",
   "account.link.h": "连接应用",
   "account.link.p": "你 Mac 上的 Andeville 正在请求使用此账户来获取更新。仅当你刚刚在应用内选择了“登录”时才连接。",
+  "account.link.buy": "应用只能连接到有许可证的账户。请先在下方购买 Andeville，然后在应用内重新选择“登录”。",
   "account.link.b": "连接这台 Mac",
   "account.licence.h": "许可证",
   "account.licence.none": "此账户上还没有许可证。",

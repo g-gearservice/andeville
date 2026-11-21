@@ -326,6 +326,7 @@
   "account.dev.submit": "測試登入",
   "account.link.h": "連接 App",
   "account.link.p": "你 Mac 上的 Andeville 要求使用這個帳號來取得更新。只有你剛剛在 App 裡選了「登入」時，才連接。",
+  "account.link.buy": "App 只能連接到有授權的帳號。請先在下方取得 Andeville，再到 App 裡重新選「登入」。",
   "account.link.b": "連接這台 Mac",
   "account.licence.h": "授權",
   "account.licence.none": "這個帳號目前還沒有授權。",

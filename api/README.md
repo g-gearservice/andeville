@@ -23,7 +23,7 @@ Flow: buy on the pay plate → Paddle webhook issues an `ANDV-…` key under `tx
 | `POST /api/auth/dev` | `{token,email,name?}` | same as above; `404` unless `DEV_LOGIN_TOKEN` is set and matches |
 | `POST /api/auth/signout` | cookie | `200 {ok:true}`, cookie cleared |
 | `POST /api/claim` | `{txn}` | `200 {key}` · `404 {pending:true}` (webhook not landed yet) · `409 {error:"claimed"}` (another account has it) · `400` bad txn |
-| `POST /api/app/link` | cookie, `{challenge}` (base64url SHA-256 of the app's verifier) | `200 {code}` · `400` bad challenge |
+| `POST /api/app/link` | cookie, `{challenge}` (base64url SHA-256 of the app's verifier) | `200 {code}` · `400` bad challenge · `403 {error:"no licence"}` (no active licence on the account: the app signs in only after a purchase) |
 | `POST /api/app/token` | `{code,verifier}`, no cookie or Origin | `200 {token}` (the app's session) · `401 {error:"bad code"}` |
 | `GET /api/download` | cookie or bearer | the DMG (`content-disposition: attachment`) · `401` signed out · `403 {error:"no licence"}` |
 | `POST /api/account/delete` | cookie | `200 {ok:true}`: user and session removed, their keys keep working but lose their `owner:` entry |

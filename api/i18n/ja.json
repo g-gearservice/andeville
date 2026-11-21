@@ -326,6 +326,7 @@
   "account.dev.submit": "テストサインイン",
   "account.link.h": "アプリを接続",
   "account.link.p": "お使いのMacのAndevilleが、アップデートのためにこのアカウントの使用を求めています。アプリ内で「サインイン」を選んだ直後の場合にのみ、接続してください。",
+  "account.link.buy": "アプリは、ライセンスのあるアカウントにのみ接続できます。下でAndevilleを入手してから、アプリ内でもう一度「サインイン」を選んでください。",
   "account.link.b": "このMacを接続",
   "account.licence.h": "ライセンス",
   "account.licence.none": "このアカウントには、まだライセンスがありません。",
