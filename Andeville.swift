@@ -2761,6 +2761,7 @@ struct SettingsView: View {
                             }
                             .buttonStyle(.plain)
                             .listRowInsets(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: 0))
+                            .disabled(Trial.expired && page != .general) // A trial that has run out: only 일반, where it is lifted.
                         }
                     } header: {
                         if !group.title.isEmpty { Text(group.title) }
@@ -2772,7 +2773,7 @@ struct SettingsView: View {
             .navigationSplitViewColumnWidth(min: 190, ideal: 190, max: 190)
             .toolbar(removing: .sidebarToggle)
         } detail: {
-            let page = model.page ?? .general
+            let page = Trial.expired ? .general : model.page ?? .general
             Group {
                 switch page {
                 case .general: GeneralPage(model: model, actions: actions)
@@ -2999,7 +3000,22 @@ struct GeneralPage: View {
 
     var body: some View {
         Form {
-            Section {
+            if Trial.isBuild && !account.licensed {
+                Section {
+                    TimelineView(.periodic(from: .now, by: 30)) { _ in
+                        LabeledContent("체험판") {
+                            HStack(spacing: 10) {
+                                Text(Trial.left > 0 ? "\(Trial.text(Trial.left)) 남음" : "체험 시간이 끝났습니다")
+                                    .font(.callout).foregroundStyle(Trial.left > 0 ? Color.secondary : Color.red)
+                                Button("구입…") { NSWorkspace.shared.open(Account.site) }
+                            }
+                        }
+                    }
+                } footer: {
+                    Text("GitHub에서 받은 Andeville은 앱을 쓴 시간으로 11시간 동안 쓸 수 있는 체험판입니다(화면이 잠긴 동안은 세지 않음). 시간이 끝나면 이 창만 열리며, 구입한 계정으로 아래 ‘계정’에서 로그인하면 언제든 풀립니다.")
+                }
+            }
+            if !Trial.expired { Section {
                 Toggle("잠금화면 해제", isOn: Binding(get: { model.hasPassword }, set: { _ in actions.togglePassword() }))
                 LabeledContent("키체인 동의") {
                     HStack(spacing: 10) {
@@ -3011,7 +3027,7 @@ struct GeneralPage: View {
                 Text("얼굴 잠금")
             } footer: {
                 Text("잠금화면에서 커서를 노치에 올리면 얼굴을 확인해 잠금을 해제합니다. 맥 로그인 비밀번호는 키체인에 저장되며, 약관에 서명하면 macOS가 키체인 비밀번호를 다시 물을 때 앱이 대신 인증합니다.")
-            }
+            } }
             Section {
                 Toggle("로그인 시 시작", isOn: Binding(get: { model.loginItem }, set: { _ in actions.toggleLogin() }))
             }
@@ -3075,13 +3091,57 @@ struct GeneralPage: View {
 
 }
 
+/// The DMG on GitHub is a trial: `./make-dmg.sh trial` marks its Info.plist, the site's DMG has no mark and none of
+/// this. Eleven hours of use, counted while the app runs on an unlocked, awake Mac; after that the app starts with
+/// nothing but Settings (see `App.dormant`) until an account that holds a licence is signed in, which lifts it at any time.
+enum Trial {
+    static let length: TimeInterval = 11 * 3600
+    static let isBuild = Bundle.main.object(forInfoDictionaryKey: "AndevilleTrial") as? Bool == true
+    private static let file = Store.dir.appendingPathComponent("trial")
+    /// Seconds used so far, the larger of two copies: the defaults and a file beside the faces, so deleting either
+    /// does not start it over.
+    /// ponytail: not the keychain, whose items macOS asks the password for after each update (see `Account.token`);
+    /// deleting both copies, or building from source, starts a new trial. Written once a minute of use, so quitting
+    /// gives back up to a minute.
+    private static var used = max(UserDefaults.standard.double(forKey: "trialUsed"), Double((try? String(contentsOf: file, encoding: .utf8)) ?? "") ?? 0)
+    private static var saved = used, last = Date().timeIntervalSince1970
+
+    /// `used` after a look at `now`, the look before it at `last`. Looks come every 2 s (`App`'s trial timer): a longer
+    /// gap is sleep, or the clock moved, and counts for 10 s at most; a clock set back counts for nothing.
+    static func add(to used: Double, last: Double, now: Double) -> Double { used + min(10, max(0, now - last)) }
+
+    static func left(used: Double) -> Double { max(0, length - used) }
+
+    /// Seconds left, counting the time since the last look unless the screen is locked.
+    static var left: Double {
+        let now = Date().timeIntervalSince1970
+        if !screenLocked() { used = add(to: used, last: last, now: now) }
+        last = now
+        if used - saved >= 60 {
+            saved = used
+            UserDefaults.standard.set(used, forKey: "trialUsed")
+            try? FileManager.default.createDirectory(at: Store.dir, withIntermediateDirectories: true)
+            try? "\(used)".write(to: file, atomically: true, encoding: .utf8)
+        }
+        return left(used: used)
+    }
+
+    static var expired: Bool { isBuild && !UserDefaults.standard.bool(forKey: Account.licensedKey) && left <= 0 }
+
+    static func text(_ seconds: Double) -> String {
+        let m = Int((seconds / 60).rounded(.up))
+        return m >= 60 ? "\(m / 60)시간 \(m % 60)분" : "\(m)분"
+    }
+}
+
 /// The Andeville account (andeville.app), which the app's updates come through. Signed in on the site's account page in
 /// the browser, with whichever sign-in the site offers; the page hands a one-time code back over andeville://signin,
 /// good only with the verifier this process kept (PKCE). The session it buys reads the account and downloads, no more.
 final class Account: ObservableObject {
     static let shared = Account()
-    static let autoKey = "autoUpdate"
+    static let autoKey = "autoUpdate", licensedKey = "accountLicensed"
     private static let tokenKey = "accountToken", emailKey = "accountEmail"
+    static var site: URL { URL(string: base + "/")! }
     /// ponytail: `defaults write com.ggear.faytai accountBaseURL https://andeville.gearservice.workers.dev` for the test site.
     private static var base: String { UserDefaults.standard.string(forKey: "accountBaseURL") ?? "https://andeville.app" }
     private static var current: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
@@ -3090,6 +3150,11 @@ final class Account: ObservableObject {
     @Published private(set) var status = ""
     @Published private(set) var latest: String? // A newer version this account may download.
     @Published private(set) var busy = false
+    /// The account held an active licence at the last answer from the site. Kept, so a paid Mac is not turned away
+    /// offline or when its session runs out; signing out and an answer without a licence clear it. Lifts the trial.
+    @Published private(set) var licensed = UserDefaults.standard.bool(forKey: licensedKey) {
+        didSet { UserDefaults.standard.set(licensed, forKey: Self.licensedKey) }
+    }
     private var verifier: String?
     /// ponytail: kept in the app's defaults, not the keychain, whose items macOS asks the password for after each
     /// update. It can only read the account and download the DMG; move it to the keychain if it ever does more.
@@ -3129,6 +3194,7 @@ final class Account: ObservableObject {
     func signOut() {
         call("/api/auth/signout", post: [:]) { _, _ in }
         forget()
+        licensed = false
         status = ""
     }
 
@@ -3152,6 +3218,7 @@ final class Account: ObservableObject {
             }
             self.email = user["email"] as? String
             UserDefaults.standard.set(self.email, forKey: Self.emailKey)
+            self.licensed = (json["licences"] as? [[String: Any]])?.contains { $0["status"] as? String == "active" } == true
             let v = dl["version"] as? String ?? ""
             guard dl["available"] as? Bool == true else { self.latest = nil; self.status = "이 계정에 라이선스가 없습니다"; return }
             guard Self.newer(v, than: Self.current) else { self.latest = nil; self.status = "최신 버전입니다"; return }
@@ -3968,6 +4035,11 @@ func selfCheck() {
     var lineBuffer = Data()
     assert(NowPlaying.lines(Data("a\nb\nc".utf8), into: &lineBuffer) == [Data("a".utf8), Data("b".utf8)] && lineBuffer == Data("c".utf8)
            && NowPlaying.lines(Data("d\n".utf8), into: &lineBuffer) == [Data("cd".utf8)] && lineBuffer.isEmpty, "the stream splits on newlines and keeps the unfinished line")
+    let h = 3600.0
+    assert(Trial.add(to: 5, last: 100, now: 102) == 7 && Trial.add(to: 5, last: 100, now: 100 + 8 * h) == 15 && Trial.add(to: 5, last: 100, now: 50) == 5
+           && Trial.left(used: 0) == 11 * h && Trial.left(used: 11 * h - 1) == 1 && Trial.left(used: 11 * h) == 0 && Trial.left(used: 99 * h) == 0,
+           "the trial is eleven hours of use: the time between looks counts, a night asleep or a clock moved does not")
+    assert(Trial.text(11 * h) == "11시간 0분" && Trial.text(59.5 * 60) == "1시간 0분" && Trial.text(61) == "2분", "what is left reads in whole minutes, rounded up")
     assert(!screenLocked(), "self-check runs on an unlocked session")
     assert(!typeIntoLockScreen("x"), "nothing may be typed while unlocked")
     let fit = SiriGrip.Fit(hidden: -65, notch: 38, minY: -15, offset: 73.5, screen: 1169)
@@ -4557,11 +4629,15 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var faceWatching = false
     private var faceRetryAfter = Date.distantPast
     private var wakePending = false
+    /// A trial that has run out (see `Trial`): nothing is set up, Settings is the app, and closing it quits.
+    private let dormant = Trial.expired
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { dormant }
 
     /// andeville:// links from Andeville's controls in the Mac's Control Center and menu bar (Controls/): the extension
     /// is sandboxed, so the app does the work.
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.scheme == "andeville" {
+        for url in urls where url.scheme == "andeville" && (!dormant || url.host == "signin") {
             switch url.host {
             case "lock": lockScreenNow()
             case "test": test()
@@ -4572,6 +4648,21 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        if Trial.isBuild {
+            log("trial: \(Int(Trial.left))s left, dormant=\(dormant)")
+            // The hours run out, or a licence arrives: the app starts over in the other state. Not while the screen
+            // is locked, where face unlock is at work.
+            Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { t in
+                guard Trial.expired != self.dormant, !screenLocked() else { return }
+                t.invalidate()
+                GeneralPage.relaunch()
+            }
+        }
+        if dormant {
+            Account.shared.start()
+            openSettings()
+            return
+        }
         Buds3D.preload()
         setUpNotch()
         notchBase.update()

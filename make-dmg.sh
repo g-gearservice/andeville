@@ -2,6 +2,7 @@
 # Build Andeville and package it.
 #   ./make-dmg.sh           → builds Andeville.app and a Andeville-<version>.dmg to hand out (drag to Applications)
 #   ./make-dmg.sh install   → builds and swaps the copy in /Applications, then relaunches (easy update)
+#   ./make-dmg.sh trial     → the DMG for GitHub, Andeville-<version>-trial.dmg: the same app marked as the 11-hour trial
 set -e
 cd "$(dirname "$0")"
 
@@ -24,6 +25,13 @@ STAGE=$(mktemp -d)
 cp -R Andeville.app "$STAGE/Andeville.app"
 ln -s /Applications "$STAGE/Applications"   # drag-to-install target inside the DMG
 DMG="Andeville-$VER.dmg"
+if [ "$1" = "trial" ]; then
+  # The mark is in the copy's Info.plist (see Trial in Andeville.swift), which the signature covers: signed again.
+  /usr/libexec/PlistBuddy -c "Add :AndevilleTrial bool true" "$STAGE/Andeville.app/Contents/Info.plist"
+  codesign --force --sign "Faytai Local Signing" --identifier com.ggear.faytai "$STAGE/Andeville.app"
+  "$STAGE/Andeville.app/Contents/MacOS/Andeville" --self-check
+  DMG="Andeville-$VER-trial.dmg"
+fi
 rm -f "$DMG"
 hdiutil create -volname "Andeville $VER" -srcfolder "$STAGE" -ov -format UDZO -quiet "$DMG"
 rm -rf "$STAGE"
