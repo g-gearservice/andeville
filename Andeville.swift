@@ -3466,7 +3466,7 @@ struct DeskBrowserPage: View {
                 .disabled(duo)
                 TextField("홈 주소", text: $deskURL, prompt: Text("비어 있음"))
             } footer: {
-                Text("바탕화면 전체를 클릭하고 입력할 수 있는 브라우저로 바꿉니다. 다른 창들 뒤에 깔려 있고, 창을 치우면(데스크톱 보기) 바로 쓸 수 있습니다. 트랙패드를 네 손가락으로 쓸어내리면 데스크톱이 보이고, 그 상태에서 한 번 더 쓸어내리거나 노치에 커서를 올리면 노치가 아래로 펼쳐져 탭과 주소창이 나옵니다(노치가 없는 화면에서는 화면 위쪽에 주소창이 내려옵니다). 네 손가락으로 쓸어올리면 주소창이 들어가고, 한 번 더 쓸어올리면 창들이 다시 돌아옵니다. 바탕화면 아이콘은 가려집니다. 처음에는 홈 주소로 열리고(홈 주소가 비어 있으면 배경화면이 보이는 빈 페이지), 그 뒤로는 데스크톱마다 마지막에 열어 둔 탭이 다시 열립니다. 새 탭도 홈 주소로 열립니다. 주소창에 home(또는 홈)이라고 넣으면 홈 주소로 갑니다(아이폰 듀오 모드에서는 집 버튼도 있습니다). 주소창에는 주소나 검색어를 넣고(북마크가 먼저, 빈 탭에서는 북마크 목록), ⌘L 주소창 · ⌘R 새로고침 · ⌘[ ⌘] 뒤로/앞으로 · ⌘T 새 탭 · ⌘W 또는 ⌘Q 탭 닫기 · ⌘⇧T 닫은 탭 다시 열기 · ⌘D 북마크 · ⌘F 찾기 · ⌘P 프린트를 쓸 수 있습니다. ⌘를 누른 채 링크를 클릭하면 뒤쪽 새 탭에서 열립니다.")
+                Text("바탕화면 전체를 클릭하고 입력할 수 있는 브라우저로 바꿉니다. 다른 창들 뒤에 깔려 있고, 창을 치우면(데스크톱 보기) 바로 쓸 수 있습니다. 트랙패드를 네 손가락으로 쓸어내리면 데스크톱이 보이고, 그 상태에서 한 번 더 쓸어내리거나 노치에 커서를 올리면 노치가 아래로 펼쳐져 탭과 주소창이 나옵니다(노치가 없는 화면에서는 화면 위쪽에 주소창이 내려옵니다). 네 손가락으로 쓸어올리면 주소창이 들어가고, 한 번 더 쓸어올리면 창들이 다시 돌아옵니다. 바탕화면 아이콘은 가려집니다. 처음에는 홈 주소로 열리고(홈 주소가 비어 있으면 배경화면이 보이는 빈 페이지), 그 뒤로는 데스크톱마다 마지막에 열어 둔 탭이 다시 열립니다. 새 탭도 홈 주소로 열립니다. 주소창에 home(또는 홈)이라고 넣으면 홈 주소로 갑니다(아이폰 듀오 모드에서는 집 버튼도 있습니다). 주소창에는 주소나 검색어를 넣고(북마크가 먼저, 빈 탭에서는 북마크 목록), ⌘L 주소창 · ⌘R 새로고침 · ⌘[ ⌘] 뒤로/앞으로 · ⌘T 새 탭 · ⌘W 탭 닫기 · ⌘Q 모든 탭 닫기(노치에서 한 번 묻습니다) · ⌘⇧T 닫은 탭 다시 열기 · ⌘D 북마크 · ⌘F 찾기 · ⌘P 프린트를 쓸 수 있습니다. ⌘를 누른 채 링크를 클릭하면 뒤쪽 새 탭에서 열립니다.")
             }
             Section {
                 Toggle(isOn: $through) {
@@ -6315,6 +6315,7 @@ private final class DeskWindow: NSWindow {
     /// a link under it. Only a click: a press that moves (a window's edge missed by a hair while dragging it) or that lands at another
     /// window's edge, in the resize margin just outside it, leaves everything where it is.
     override func sendEvent(_ e: NSEvent) {
+        if DuoMenu.shared.answered(e) { return } // Return or Escape, while the notch asks (`DuoMenu.ask`).
         let at = e.cgEvent?.location ?? .zero
         if e.type == .leftMouseDown, !ShowDesktop.isOn, ShowDesktop.windowsCover(frame) { // Shown: the windows peek in at the edges, and clicks are the page's.
             clearing = ShowDesktop.nearWindowEdge(at) ? nil : at
@@ -7390,7 +7391,8 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
         case ("l", false): revealAddress()
         case ("l", true): toggleSidebar()
         case ("t", false): openHome(in: newTab()); revealAddress()
-        case ("w", false), ("q", false): closeTab(current) // ⌘Q as well: on the desk it closes what is in front, not Andeville.
+        case ("w", false): closeTab(current)
+        case ("q", false): askToCloseAll()
         case ("r", false): web.reload()
         case ("[", false): web.goBack()
         case ("]", false): web.goForward()
@@ -7485,6 +7487,29 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
         t.web.removeFromSuperview()
         if tabs.isEmpty { openHome(in: newTab()); return } // The last tab closed leaves the home, not an empty desk.
         select(i < current ? current - 1 : min(current, tabs.count - 1))
+    }
+
+    /// ⌘Q on the desk closes what is in front, the page's tabs, not Andeville; and all of them only once asked. The
+    /// notch asks (`DuoMenu.ask`: its button, Return or ⌘Q again say yes); on a screen without a notch, an alert.
+    /// The home is left, as after the last tab closes, and ⌘⇧T brings the tabs back one by one.
+    private func askToCloseAll() {
+        let question = "탭 \(tabs.count)개를 닫을까요?", close = { [weak self] in
+            guard let self else { return }
+            while self.tabs.count > 1 { self.closeTab(self.tabs.count - 1) }
+            self.closeTab(0)
+        }
+        if DuoMenu.shared.page === self, DuoMenu.shared.on {
+            if DuoMenu.shared.asking { return DuoMenu.shared.answer(true) }
+            if DuoMenu.shared.typing { hideAddress() }
+            DuoMenu.shared.ask(question, yes: close)
+        } else {
+            let a = NSAlert()
+            a.messageText = question
+            a.addButton(withTitle: "모두 닫기")
+            a.addButton(withTitle: "취소")
+            NSApp.activate(ignoringOtherApps: true)
+            if a.runModal() == .alertFirstButtonReturn { close() }
+        }
     }
 
     private func reopenTab() {
@@ -8139,6 +8164,7 @@ final class DuoMenu: ObservableObject {
     private var letGone = true { didSet { if letGone != oldValue { updateSlot() } } }
     /// The island goes back into the notch: the address stops being typed in. (A press elsewhere, four fingers up.)
     func fold() {
+        answer(false)
         bottom?.makeFirstResponder(nil)
         typing = false
         (letGone, visited, sent) = (true, false, true)
@@ -8205,6 +8231,30 @@ final class DuoMenu: ObservableObject {
     }
     private var letGoBySwipe = false
 
+    /// The island asks before something that cannot be taken back in one go (⌘Q: all the page's tabs close): it
+    /// opens on the question in place of the tabs. Its button, Return, or the same keys again say yes; 취소, Escape
+    /// or a press anywhere else say no.
+    func ask(_ question: String, yes: @escaping () -> Void) {
+        whenYes = yes
+        tabStrip.ask(question)
+        updateSlot()
+    }
+    func answer(_ yes: Bool) {
+        guard let then = whenYes else { return }
+        whenYes = nil
+        tabStrip.ask(nil)
+        updateSlot()
+        if yes { then() }
+    }
+    var asking: Bool { whenYes != nil }
+    private var whenYes: (() -> Void)?
+    /// A key while the island asks: Return is the yes, Escape the no. True when the key was the answer.
+    func answered(_ e: NSEvent) -> Bool {
+        guard asking, e.type == .keyDown, [36, 76, 53].contains(e.keyCode) else { return false }
+        answer(e.keyCode != 53)
+        return true
+    }
+
     /// Lends the page's field to the bar. A page on another desktop gets it back when it is on show again.
     private func dock() {
         guard let f = page?.field, f.superview !== slot.fieldHost else { return }
@@ -8221,7 +8271,7 @@ final class DuoMenu: ObservableObject {
         // Only once asked for: a field that took the keyboard on its own (the island's first key view) gives it back.
         if !typing, let f = page?.field, f.currentEditor() != nil, f.window === bottom { bottom?.makeFirstResponder(nil) }
         guard let bottom else { return }
-        let tabs = on && (typing || (DuoPad.shared.desk && !letGone))
+        let tabs = on && (typing || asking || (DuoPad.shared.desk && !letGone))
         guard tabs != tabsShown else { return }
         tabsShown = tabs
         if !tabs { slot.rest(); tabStrip.rest() }
@@ -8230,6 +8280,7 @@ final class DuoMenu: ObservableObject {
     }
 
     func set(on: Bool, duo: Bool) {
+        answer(false)
         self.on = on
         self.duo = on && duo
         bottom?.orderOut(nil)
@@ -8289,6 +8340,7 @@ final class DuoNotchBar: NSPanel {
     /// Two fingers on the island go by `DuoMenu.swiped` first; what it leaves is the tab bar's, whose tabs then
     /// tuck under one another anew (`DuoTabStrip.soften`).
     override func sendEvent(_ e: NSEvent) {
+        if DuoMenu.shared.answered(e) { return }
         guard e.type == .scrollWheel else { return super.sendEvent(e) }
         if DuoMenu.shared.swiped(e) { return }
         super.sendEvent(e)
@@ -8512,9 +8564,27 @@ final class DuoTabStrip: NSView {
     private var pulled: CGFloat = 0
     static let pullToAdd: CGFloat = 56
     private let plus = NSImageView()
+    /// The island's question (`DuoMenu.ask`), over the tabs: what is asked, 취소 and the yes.
+    private let asker = NSView(), question = NSTextField(labelWithString: "")
+    private let no: NSButton = FirstClickButton(title: "", target: nil, action: nil), yes: NSButton = FirstClickButton(title: "", target: nil, action: nil)
 
     init() {
         super.init(frame: .zero)
+        asker.wantsLayer = true
+        asker.layer?.backgroundColor = NSColor(white: 0.13, alpha: 1).cgColor
+        asker.isHidden = true
+        question.font = .systemFont(ofSize: 13, weight: .medium)
+        question.textColor = .white
+        question.lineBreakMode = .byTruncatingTail
+        for (b, title, fill, action) in [(no, "취소", NSColor(white: 0.26, alpha: 1), #selector(sayNo)), (yes, "모두 닫기", NSColor.systemRed, #selector(sayYes))] {
+            b.isBordered = false
+            b.attributedTitle = NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 12.5, weight: .semibold), .foregroundColor: NSColor.white])
+            b.wantsLayer = true
+            b.layer?.backgroundColor = fill.cgColor
+            b.layer?.cornerRadius = 13
+            (b.target, b.action) = (self, action)
+        }
+        [question, no, yes].forEach(asker.addSubview)
         guard let bar else { return }
         bar.setValue(self, forKey: "delegate")
         wantsLayer = true
@@ -8524,6 +8594,7 @@ final class DuoTabStrip: NSView {
         plus.alphaValue = 0
         addSubview(plus) // Under the bar, which moves off it.
         addSubview(bar)
+        addSubview(asker)
         appearance = NSAppearance(named: .darkAqua) // On the island's black.
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -8537,7 +8608,20 @@ final class DuoTabStrip: NSView {
     override func layout() {
         super.layout()
         place()
+        asker.frame = bounds
+        let w = bounds.width, y = (bounds.height - 26) / 2
+        yes.frame = NSRect(x: w - 9 - 74, y: y, width: 74, height: 26)
+        no.frame = NSRect(x: yes.frame.minX - 6 - 46, y: y, width: 46, height: 26)
+        question.frame = NSRect(x: 16, y: (bounds.height - 18) / 2, width: max(no.frame.minX - 6 - 16, 0), height: 18)
     }
+
+    /// The island's question over the tabs, or nil to have the tabs back.
+    func ask(_ q: String?) {
+        question.stringValue = q ?? ""
+        asker.isHidden = q == nil
+    }
+    @objc private func sayYes() { DuoMenu.shared.answer(true) }
+    @objc private func sayNo() { DuoMenu.shared.answer(false) }
 
     /// The bar, pushed left by a pull past its end, and the + in the room that leaves: fainter until the pull is enough.
     private func place() {
