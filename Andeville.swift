@@ -6077,7 +6077,7 @@ final class DeskBrowser {
             guard on, !wasOn || tick % 3 == 0 && NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { return }
             let p = NSEvent.mouseLocation, here = self.frames.values.joined().filter { $0.window.isOnActiveSpace }
             guard let f = here.first(where: { $0.window.frame.contains(p) }) ?? here.first else { return }
-            NSApp.activate(ignoringOtherApps: true)
+            Self.comeForward(f.window)
             f.window.makeKeyAndOrderFront(nil)
         }
         ShowDesktop.onChange { look(true) }
@@ -6210,6 +6210,36 @@ final class DeskBrowser {
         }
     }
 
+    /// Andeville in front, for the keyboard: the desk, or the notch island over it, is what the keys are meant for,
+    /// and ⌘Q pressed there must not reach the app that was in front before. macOS may turn an app's own request
+    /// down while another app is active; a moment later, if it has (and `still` wanted), the window server is told
+    /// itself, as the Dock tells it (SkyLight, not public API: looked up by name, and left at the request without it).
+    static func comeForward(_ window: NSWindow, while still: @escaping () -> Bool = { true }) {
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier != getpid() else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier != getpid(), still() else { return }
+            typealias GetPSN = @convention(c) (pid_t, UnsafeMutableRawPointer) -> Int32
+            typealias SetFront = @convention(c) (UnsafeMutableRawPointer, UInt32, UInt32) -> Int32
+            guard let hi = dlopen("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", RTLD_NOW),
+                  let sky = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_NOW),
+                  let get = dlsym(hi, "GetProcessForPID"), let set = dlsym(sky, "_SLPSSetFrontProcessWithOptions") else { return }
+            var psn: UInt64 = 0 // A ProcessSerialNumber: two 32-bit halves.
+            guard unsafeBitCast(get, to: GetPSN.self)(getpid(), &psn) == 0 else { return }
+            _ = unsafeBitCast(set, to: SetFront.self)(&psn, UInt32(window.windowNumber), 0x200) // 0x200: as the user's own doing.
+            log("desk: brought forward by the window server")
+        }
+    }
+
+    /// ⌘Q while the desktop is shown, whichever app macOS has in front (`holdEscape`): the desk under the cursor asks.
+    fileprivate func commandQ() {
+        let p = NSEvent.mouseLocation, here = frames.values.joined().filter { $0.window.isOnActiveSpace }
+        guard let f = here.first(where: { $0.window.frame.contains(p) }) ?? here.first else { return }
+        Self.comeForward(f.window)
+        f.window.makeKeyAndOrderFront(nil)
+        f.askToCloseAll()
+    }
+
     private var escTap: CFMachPort?
     /// The desktop is shown with the browser on (the watch in start() keeps it); the Escape tap is on only then.
     fileprivate var deskOn = false { didSet { if let t = escTap, deskOn != oldValue { CGEvent.tapEnable(tap: t, enable: deskOn) } } }
@@ -6228,7 +6258,15 @@ final class DeskBrowser {
                 if let t = DeskBrowser.shared.escTap, DeskBrowser.shared.deskOn { CGEvent.tapEnable(tap: t, enable: true) }
                 return Unmanaged.passUnretained(e)
             }
-            guard e.getIntegerValueField(.keyboardEventKeycode) == 53, DeskBrowser.shared.deskOn else { return Unmanaged.passUnretained(e) }
+            let key = e.getIntegerValueField(.keyboardEventKeycode)
+            // ⌘Q with the desktop shown is the desk's, not the app's whose windows were moved aside: with Andeville in
+            // front it comes the usual way (`DeskFrame.command`); with another app in front it would quit that app.
+            if key == 12, DeskBrowser.shared.deskOn, e.flags.intersection([.maskCommand, .maskAlternate, .maskControl]) == .maskCommand,
+               NSWorkspace.shared.frontmostApplication?.processIdentifier != getpid() {
+                if type == .keyDown, e.getIntegerValueField(.keyboardEventAutorepeat) == 0 { DispatchQueue.main.async { DeskBrowser.shared.commandQ() } }
+                return nil
+            }
+            guard key == 53, DeskBrowser.shared.deskOn else { return Unmanaged.passUnretained(e) }
             if NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(), let ns = NSEvent(cgEvent: e) {
                 DispatchQueue.main.async { NSApp.keyWindow?.sendEvent(ns) }
             }
@@ -7492,7 +7530,7 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
     /// ⌘Q on the desk closes what is in front, the page's tabs, not Andeville; and all of them only once asked. The
     /// notch asks (`DuoMenu.ask`: its button, Return or ⌘Q again say yes); on a screen without a notch, an alert.
     /// The home is left, as after the last tab closes, and ⌘⇧T brings the tabs back one by one.
-    private func askToCloseAll() {
+    fileprivate func askToCloseAll() {
         let question = "탭 \(tabs.count)개를 닫을까요?", close = { [weak self] in
             guard let self else { return }
             while self.tabs.count > 1 { self.closeTab(self.tabs.count - 1) }
@@ -7697,7 +7735,7 @@ private final class DeskFrame: NSObject, WKNavigationDelegate, WKUIDelegate, WKD
     }
 
     private func showBar() {
-        NSApp.activate(ignoringOtherApps: true) // Andeville is an accessory app: typing needs it in front.
+        DeskBrowser.comeForward(window) // Andeville is an accessory app: typing needs it in front.
         if docked, let cover = field.window {
             let address = field.stringValue
             DuoMenu.shared.typing = true // First: the bar's panel takes the keyboard only while typed in.
@@ -8275,6 +8313,12 @@ final class DuoMenu: ObservableObject {
         guard tabs != tabsShown else { return }
         tabsShown = tabs
         if !tabs { slot.rest(); tabStrip.rest() }
+        // Out over the desk, the island has the keyboard's app with it: what is typed next (⌘Q, ⌘W, ⌘L) is the
+        // desk's, not the app's that was in front with no window to show. (Typed in, `showBar` has seen to it.)
+        if tabs, !typing, let w = page?.window {
+            DeskBrowser.comeForward(w) { [weak self] in self?.tabsShown == true }
+            if !w.isKeyWindow { w.makeKeyAndOrderFront(nil) }
+        }
         islandShape?.set(open: tabs)
         bottom.ignoresMouseEvents = !tabs
     }
