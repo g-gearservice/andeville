@@ -8772,6 +8772,11 @@ final class DuoTabStrip: NSView {
         let list = listClass.perform(NSSelectorFromString("alloc")).takeUnretainedValue()
             .perform(NSSelectorFromString("initWithTabBarItems:"), with: shown).takeUnretainedValue()
         bar.perform(NSSelectorFromString("setTabBarItemList:"), with: list)
+        // The same tabs with another one in front: the list's setter sees nothing new and leaves the buttons as they
+        // were, the old front tab still drawn in front with the new one's address in it. Told to lay its buttons out,
+        // the bar takes the new front tab. (The argument is its "animated": any object reads as yes.)
+        let relay = NSSelectorFromString("_updateButtonsAndLayOutAnimated:")
+        if bar.responds(to: relay) { bar.perform(relay, with: self) }
         soften()
         // Again once Safari's bar has laid its tabs out and moved them there: it tells of neither.
         for t in [0.1, 0.45] { DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self] in self?.soften() } }
