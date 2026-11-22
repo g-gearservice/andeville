@@ -5,17 +5,11 @@ A macOS notch hub: a live island around the MacBook notch with face unlock, a no
 ## Requirements
 
 - macOS 14 or later (Control Center controls need macOS 26)
-- Xcode command line tools
 
-## Build
+## Download
 
-```sh
-./build.sh
-```
-
-Builds `Andeville.app`, signs it, runs a self-check and launches it. `./make-dmg.sh` packages a DMG;
-`./make-dmg.sh trial` packages the one released here, which runs for 11 hours of use and then asks for
-an account that holds a licence (andeville.app).
+The disk image on the [releases page](https://github.com/g-gearservice/andeville/releases/latest) is a trial: it runs
+for 111 hours of use and then asks for an account that holds a licence ([andeville.app](https://andeville.app)).
 
 ## License
 
