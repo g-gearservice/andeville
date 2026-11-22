@@ -1,0 +1,13 @@
+# Only the README, the licence and the trial disk image go to GitHub. Everything else stays off it,
+# the full (paid) disk image above all: Andeville-<version>.dmg is never to be uploaded.
+/*
+!/.gitignore
+!/README.md
+!/LICENSE
+!/Andeville-*-trial.dmg
+
+# Secrets, wherever they turn up (kept in case a folder is ever let back in).
+.DS_Store
+.wrangler
+.dev.vars*
+.env*
